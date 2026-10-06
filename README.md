@@ -1,6 +1,6 @@
 # mirus
 
-Runs shared feature logic across distributed offline computation and real-time inference within millionseconds.
+An easy-to-use data platform designed for fintech companies. Write feature logic once and seamlessly run it across both distributed engines and real-time inference with millisecond-level latency.
 
 The same Python functions serve a live request and an offline job. This repository is a design-stage library. Licensed under the [MIT License](LICENSE).
 
