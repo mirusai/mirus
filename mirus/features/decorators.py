@@ -34,7 +34,7 @@ def field(*, source: str) -> Callable[[Function], Function]:
             name=function.__name__,
             function=function,
         )
-        registry.get_default_registry().register_field(declaration)
+        registry.default_registry.register_field(declaration)
         return function
     return decorate
 
@@ -53,6 +53,6 @@ def feature(
             function=function,
             parameters=_snapshot_parameters(parameters),
         )
-        registry.get_default_registry().register_feature(declaration)
+        registry.default_registry.register_feature(declaration)
         return function
     return decorate

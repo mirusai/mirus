@@ -5,7 +5,7 @@ from functools import partial
 import pytest
 
 from mirus.features.decorators import feature, field
-from mirus.features.compute import compile_features, prepare_features
+from mirus.features.compute import compute_features, prepare_features
 from mirus.backtest import compile_offline
 
 pytestmark = pytest.mark.usefixtures("isolated_feature_registry")
@@ -33,7 +33,6 @@ def test_online_and_offline_compilers_have_selection_parity(
     # Collection stores one raw family; each compiler expands it independently.
     assert len(isolated_feature_registry.snapshot().features) == 1
     names = ["amount_90d", "amount_30d", "amount_90d"]
-    online = compile_features(names)
     offline = compile_offline(names)
 
     assert offline.feature_names == ("amount_90d", "amount_30d")
@@ -44,18 +43,9 @@ def test_online_and_offline_compilers_have_selection_parity(
     assert offline.required_sources == ("loans",)
     assert offline.field_names_by_source == {"loans": ("dollars",)}
     assert offline.fields_by_source["loans"][0].function is dollars
-    assert tuple(dependency.feature_name for dependency in offline.dependencies) == (
-        "amount_90d",
-        "amount_30d",
-    )
-    assert all(
-        dependency.source == "loans"
-        and dependency.field_names == ("dollars",)
-        for dependency in offline.dependencies
-    )
 
     online_features = tuple(prepare_features(names).features_by_name.values())
-    offline_features = offline.sources[0].features
+    offline_features = offline.features_by_source["loans"]
     assert tuple(feature.name for feature in online_features) == offline.feature_names
     assert tuple(feature.name for feature in online_features) == tuple(
         feature.name for feature in offline_features
@@ -75,8 +65,8 @@ def test_compilers_are_uncached_and_use_fresh_registry_snapshots():
     def count(rows) -> int:
         return len(rows)
 
-    online_first = compile_features()
-    online_second = compile_features()
+    online_first = prepare_features()
+    online_second = prepare_features()
     offline_first = compile_offline()
     offline_second = compile_offline()
 
@@ -89,4 +79,4 @@ def test_compilers_are_uncached_and_use_fresh_registry_snapshots():
         return 2 * len(rows)
 
     assert compile_offline().feature_names == ("count", "twice_count")
-    assert online_first({"loans": [{}]}) == {"count": 1}
+    assert compute_features({"loans": [{}]}, catalog=online_first) == {"count": 1}

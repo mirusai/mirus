@@ -2,22 +2,19 @@
 
 from dataclasses import dataclass
 
-from mirus.features.definitions import (
-    CompiledFeature,
-    CompiledField,
-    FeatureDependency,
-    SourceSelection,
-)
+from mirus.features.definitions import CompiledFeature, CompiledField, FeatureCatalog
 
 
 @dataclass(frozen=True)
 class OfflinePlan:
-    """Concrete callables, dependencies, and types for one offline selection."""
+    """Prepared catalog and declared output types for one offline selection."""
 
-    sources: tuple[SourceSelection, ...]
-    feature_names: tuple[str, ...]
-    dependencies: tuple[FeatureDependency, ...]
+    catalog: FeatureCatalog
     output_types: tuple[tuple[str, object], ...]
+
+    @property
+    def feature_names(self) -> tuple[str, ...]:
+        return self.catalog.feature_names
 
     @property
     def output_schema(self) -> dict[str, object]:
@@ -25,25 +22,22 @@ class OfflinePlan:
 
     @property
     def required_sources(self) -> tuple[str, ...]:
-        return tuple(source.source for source in self.sources)
+        return tuple(self.catalog.fields_by_source)
 
     @property
     def fields_by_source(self) -> dict[str, tuple[CompiledField, ...]]:
-        return {
-            source.source: source.fields
-            for source in self.sources
-        }
+        return self.catalog.fields_by_source
 
     @property
     def features_by_source(self) -> dict[str, tuple[CompiledFeature, ...]]:
-        return {
-            source.source: source.features
-            for source in self.sources
-        }
+        grouped: dict[str, list[CompiledFeature]] = {}
+        for feature in self.catalog.features_by_name.values():
+            grouped.setdefault(feature.source, []).append(feature)
+        return {source: tuple(features) for source, features in grouped.items()}
 
     @property
     def field_names_by_source(self) -> dict[str, tuple[str, ...]]:
         return {
-            source.source: tuple(field.name for field in source.fields)
-            for source in self.sources
+            source: tuple(field.name for field in fields)
+            for source, fields in self.catalog.fields_by_source.items()
         }

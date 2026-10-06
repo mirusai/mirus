@@ -8,5 +8,5 @@ def isolated_feature_registry(monkeypatch):
     from mirus.features.registry import Registry
 
     isolated = Registry()
-    monkeypatch.setattr(registry, "_default_registry", isolated)
+    monkeypatch.setattr(registry, "default_registry", isolated)
     return isolated

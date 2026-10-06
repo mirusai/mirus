@@ -6,8 +6,8 @@ import sys
 import pytest
 
 from mirus.features.decorators import feature, field
-from mirus.features.compute import compile_features, compute_features
-from mirus.backtest import OfflinePlan, compile_offline, feature_schema
+from mirus.features.compute import compute_features, prepare_features
+from mirus.backtest import OfflinePlan, compile_offline
 
 pytestmark = pytest.mark.usefixtures("isolated_feature_registry")
 
@@ -15,16 +15,13 @@ pytestmark = pytest.mark.usefixtures("isolated_feature_registry")
 def test_public_api_exports_come_from_isolated_modules():
     from mirus import backtest
     from mirus.features import compute, compiler, decorators
-    from mirus.features.compute import prepare_features
 
-    assert compile_features is compute.compile_features
     assert compute_features is compute.compute_features
     assert prepare_features is compiler.prepare_features
     assert compile_offline is backtest.compile_offline
     assert OfflinePlan is backtest.OfflinePlan
     assert feature is decorators.feature
     assert field is decorators.field
-    assert feature_schema is backtest.feature_schema
 
 
 def test_selected_computation_still_validates_unselected_declarations():
@@ -39,17 +36,6 @@ def test_selected_computation_still_validates_unselected_declarations():
     # Decoration remains permissive; even a subset validates the entire catalog.
     with pytest.raises(ValueError, match="non-empty sequence"):
         compute_features({"loans": []}, feature_names=["valid"])
-
-
-def test_compiled_online_plan_is_independent_of_registry(isolated_feature_registry):
-    @feature(source="loans")
-    def count(rows) -> int:
-        return len(rows)
-
-    runner = compile_features(["count"])
-    isolated_feature_registry._features.clear()
-
-    assert runner({"loans": [{}, {}]}) == {"count": 2}
 
 
 def test_default_all_subset_and_empty_selection():
@@ -81,44 +67,35 @@ def test_default_all_subset_and_empty_selection():
     assert calls == []
 
 
-def test_each_plan_is_fresh_and_results_use_current_payload():
+def test_results_use_the_current_payload():
     @feature(source="loans")
     def count(rows) -> int:
         return len(rows)
 
-    assert feature_schema(["count"]) == {"count": int}
-    first = compile_features(["count"])
-    second = compile_features(["count", "count"])
-    assert second is not first
-    assert feature_schema(["count"]) == {"count": int}
+    assert compile_offline(["count"]).output_schema == {"count": int}
     assert compute_features({"loans": [{}]}, ["count"]) == {"count": 1}
     assert compute_features({"loans": [{}, {}]}, ["count"]) == {"count": 2}
 
 
-def test_new_feature_appears_in_next_plan_without_changing_existing_plan():
+def test_new_feature_appears_in_the_next_computation():
     @feature(source="loans")
     def count(rows) -> int:
         return len(rows)
 
-    original = compile_features()
     assert compute_features({"loans": [{}]}) == {"count": 1}
 
     @feature(source="loans")
     def twice_count(rows) -> int:
         return 2 * len(rows)
 
-    assert compile_features() is not original
     assert compute_features({"loans": [{}]}) == {"count": 1, "twice_count": 2}
-    # Already captured online plans remain snapshots.
-    assert original({"loans": [{}]}) == {"count": 1}
 
 
-def test_new_field_appears_in_next_plan():
+def test_new_field_appears_in_the_next_computation():
     @feature(source="loans")
     def total(rows) -> float:
         return sum((row["amount"] for row in rows), 0.0)
 
-    original = compile_features(["total"])
     calls = []
 
     @field(source="loans")
@@ -126,7 +103,6 @@ def test_new_field_appears_in_next_plan():
         calls.append("field")
         return row["amount"] / 7
 
-    assert compile_features(["total"]) is not original
     assert compute_features({"loans": [{"amount": 70}]}, ["total"]) == {"total": 70.0}
     assert calls == ["field"]
 
@@ -143,7 +119,7 @@ def test_single_feature_schema_does_not_execute_and_unused_source_is_not_read():
     def unused(rows) -> int:
         raise AssertionError("Unselected aggregation ran")
 
-    assert feature_schema(["count"]) == {"count": int}
+    assert compile_offline(["count"]).output_schema == {"count": int}
     assert calls == []
     assert compute_features({"loans": []}, ["count"]) == {"count": 0}
     assert calls == ["count"]
@@ -166,27 +142,27 @@ def test_customer_module_registers_on_import_only(tmp_path, monkeypatch):
         module = importlib.import_module(module_name)
         assert compute_features({"loans": [{}]}) == {"customer_count": 1}
         assert importlib.import_module(module_name) is module
-        assert feature_schema() == {"customer_count": int}
+        assert compile_offline().output_schema == {"customer_count": int}
     finally:
         sys.modules.pop(module_name, None)
 
 
-def test_duplicate_declarations_fail_during_each_compile():
+def test_duplicate_declarations_fail_during_each_prepare():
     @feature(source="loans", feature_name="count")
     def first(rows) -> int:
         return len(rows)
 
-    original = compile_features()
+    catalog = prepare_features()
 
     @feature(source="devices", feature_name="count")
     def second(rows) -> int:
         return 999
 
     with pytest.raises(ValueError, match="Duplicate feature"):
-        compile_features()
+        compute_features({"loans": [{}]})
     with pytest.raises(ValueError, match="Duplicate feature"):
         compile_offline()
-    assert original({"loans": [{}]}) == {"count": 1}
+    assert compute_features({"loans": [{}]}, catalog=catalog) == {"count": 1}
 
 
 def test_feature_names_must_not_be_a_bare_string():

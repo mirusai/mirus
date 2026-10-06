@@ -55,10 +55,8 @@ mirusai/
 │   │   └── mysql.py     # MySQLFetcher and connection helper
 │   └── backtest/        # Separate mirus-backtest distribution
 │       ├── interface.py # OfflineFetcher and OfflineBackend protocol
-│       ├── api.py       # Public offline metadata compilation
-│       ├── compiler.py
+│       ├── compiler.py  # compile_offline()
 │       ├── plan.py
-│       ├── schema.py
 │       └── spark/
 │           ├── fetcher.py
 │           └── temporal.py
@@ -81,10 +79,10 @@ Public imports are grouped by responsibility:
 | --- | --- |
 | `feature`, `field` | `mirus.features.decorators` |
 | `compute_features` | `mirus.features.compute` |
-| Optional `prepare_features`, `compile_features` | `mirus.features.compute` |
+| Optional `prepare_features` | `mirus.features.compute` |
 | `Payload` and shared contract types | `mirus.payload` |
 | `OnlineFetcher`, `MySQLConnection` | `mirus.serving` |
-| `OfflineFetcher`, `compile_offline`, `feature_schema` | `mirus.backtest` |
+| `OfflineFetcher`, `compile_offline` | `mirus.backtest` |
 
 The mixed exports from `mirus` and `mirus.features` have been removed; update
 existing imports to these modules. Computation does not import backtest code.
@@ -134,15 +132,20 @@ aggregation work. There is no automatic shared-scan optimization or plan caching
 - Prepare **all fields for each selected source once**, then execute **only the
   selected aggregation functions**. Do not read or prepare unselected sources.
 - `source` currently names one top-level payload section. Lists stay as rows;
-  a single object becomes one row and `None` becomes zero rows. Nested values are
-  preserved, not implicitly exploded or joined. Multiple-source functions,
-  nested source paths and automatic flattening are deferred.
+  a single object becomes one row and `None` becomes zero rows. Each segment row
+  receives the root context scalars. Nested objects are inlined onto that row
+  from the deepest object; a key already on the nearer row overrides the same
+  key from deeper down. A list of records nested under the row repeats the row
+  once per element, so two payments produce two loan rows. Lists that are not
+  nested under that row are not joined in. Multiple-source functions and nested source paths remain
+  deferred. Retrieval still returns the nested payload; MySQL and Spark do not
+  flatten it.
 - Root-level scalar values (including null) are added to each source row before
   field transformations; root objects and lists are excluded. Source-row values
   override root values, and calculated fields override both. Empty sources stay empty.
-- Field functions read the raw row with root context and are independent of other fields.
-  Their results are added to a shallow row copy. Aggregations share those prepared
-  rows. User functions must be pure/read-only, including nested objects.
+- Field functions read that flattened row and are independent of other fields.
+  Their results are added onto it. Aggregations share those prepared
+  rows. User functions must be pure/read-only.
 - Single outputs use the function name or `feature_name`. Parameterized outputs
   use the concrete name generated from the template. Each selected callable's
   return value is stored under exactly one key; there is no dictionary flattening.
@@ -151,7 +154,7 @@ aggregation work. There is no automatic shared-scan optimization or plan caching
 - Omitted `feature_names` (or `None`) selects everything; `[]` executes nothing.
   Repeated names are deduplicated. Unknown names fail before any computation;
   duplicate declarations fail during compilation. Use a list, not a bare string.
-- `feature_schema()` records Python types (including nullable unions) without
+- `compile_offline().output_schema` records Python types (including nullable unions) without
   executing user functions. It does not
   coerce/validate runtime values. Spark schema conversion and UDF wrappers are
   not implemented in this first structural pass.
@@ -185,8 +188,8 @@ the scan over parameter combinations needed to detect duplicate names.
 No LRU or global prepared-plan cache is used.
 
 Catalogs are snapshots of declarations. Treat their mappings and shared prepared
-rows as read-only. Field functions receive root context plus the raw source row,
-not outputs of other fields. Register definitions before serving, and rebuild the
+rows as read-only. Field functions receive root context plus the flattened
+source row, not outputs of other fields. Register definitions before serving, and rebuild the
 catalog when definitions change.
 
 Importable module-level callables can be serialized with the catalog. Workers

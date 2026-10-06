@@ -131,7 +131,7 @@ def main():
     print(f"{'Combinations':>12} {'Selected':>8} {'Rows':>7} {'Path':<14} {'p50 ms':>10} {'p95 ms':>10}", flush=True)
     for combinations in args.combinations:
         # Benchmark-only isolation: exercise real decorators/APIs without accumulating catalog entries.
-        with patch.object(registry, "_default_registry", registry.Registry()):
+        with patch.object(registry, "default_registry", registry.Registry()):
             register_catalog(combinations)
             for selected in args.selected:
                 selection = selected_features(selected)

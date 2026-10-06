@@ -106,10 +106,16 @@ values into each row. The intermediate rows are:
 ]
 ```
 
-Here, "flat" means source rows enriched with root context—not recursive flattening.
-Nested objects within a row remain nested; sibling lists are not cross-joined.
+The flattened `loans` segment is `{ "loans": [ ...rows below... ] }`. Every row
+receives the root context (`user_id`, `as_of`, `local_per_usd`) and the loan's
+own fields. Nested objects are inlined onto that row from the deepest object, so
+`agreement.term.months` becomes `months` beside `agreement_id` and
+`interest_rate`. A list nested under the loan, such as `payments`, is copied
+onto the loan and repeats the loan once per element. The loan's own key wins
+when a deeper object uses the same name. MySQL and Spark still return the
+nested payload; this runs only while preparing feature rows.
 
-- A source object becomes one row; a source list stays a list; `None` becomes no rows.
+- A source object becomes one row. A source list stays a list. A missing source or an empty list gives the feature no rows, and the feature chooses the result.
 - Root dictionaries and lists are not copied into other sources. Scalar values,
   including null, are included.
 - Source-row keys override root keys on collisions.
@@ -139,8 +145,8 @@ After field evaluation, the shared rows are:
 ```
 
 Calculated field keys override existing row keys. All selected features on `loans`
-receive this same prepared list; they must treat it, including nested values, as
-read-only. There is no field-level dependency analysis.
+receive this same prepared list; they must treat it as read-only. There is no
+field-level dependency analysis.
 
 ## 5. Prepared rows → selected features → result
 

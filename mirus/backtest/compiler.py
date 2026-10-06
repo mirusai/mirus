@@ -4,8 +4,8 @@ from collections.abc import Sequence
 from functools import partial
 from typing import get_type_hints
 
-from mirus.features.compiler import compile_selection
-from mirus.features.definitions import CompiledFeature, DeclarationSnapshot
+from mirus.features.compiler import prepare_features
+from mirus.features.definitions import CompiledFeature
 from .plan import OfflinePlan
 
 
@@ -20,14 +20,14 @@ def _scalar_output_type(feature: CompiledFeature) -> object:
 
 
 def compile_offline(
-    snapshot: DeclarationSnapshot,
     feature_names: Sequence[str] | None = None,
 ) -> OfflinePlan:
-    """Compile one fresh offline artifact without importing Spark."""
-    selection = compile_selection(snapshot, feature_names)
+    """Compile a fresh Spark-free artifact from current declarations."""
+    catalog = prepare_features(feature_names)
     return OfflinePlan(
-        sources=selection.sources,
-        feature_names=selection.feature_names,
-        dependencies=selection.dependencies,
-        output_types=tuple((feature.name, _scalar_output_type(feature)) for feature in selection.features),
+        catalog=catalog,
+        output_types=tuple(
+            (name, _scalar_output_type(feature))
+            for name, feature in catalog.features_by_name.items()
+        ),
     )

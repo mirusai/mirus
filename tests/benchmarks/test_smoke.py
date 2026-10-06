@@ -19,7 +19,7 @@ def test_feature_benchmark_reports_comparable_paths(tmp_path):
         assert set(run["timings"]) == {
             "raw_aggregation_only",
             "raw_end_to_end",
-            "compiled_features",
+            "prepared_catalog",
             "compute_features",
         }
         for name, timings in run["timings"].items():

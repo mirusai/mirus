@@ -7,13 +7,13 @@ from pathlib import Path
 import pytest
 
 from mirus.features.decorators import feature, field
-from mirus.features.compute import compile_features
-from mirus.backtest import compile_offline, feature_schema
+from mirus.features.compute import compute_features
+from mirus.backtest import compile_offline
 
 pytestmark = pytest.mark.usefixtures("isolated_feature_registry")
 
 
-def test_selected_aggregations_share_all_fields_and_skip_other_sources(isolated_feature_registry):
+def test_selected_aggregations_share_all_fields_and_skip_other_sources():
     calls = []
 
     @field(source="loans")
@@ -48,21 +48,16 @@ def test_selected_aggregations_share_all_fields_and_skip_other_sources(isolated_
     def device_count(rows) -> int:
         raise AssertionError("Unselected source aggregation ran")
 
-    selected = compile_features(["count", "total_usd", "count"])
     payload = {"loans": [{"amount": 70}, {"amount": 140}]}
     original = deepcopy(payload)
-    assert calls == []  # Selection does not run user code.
-    assert selected(payload) == {"count": 2, "total_usd": 30.0}
+    assert calls == []  # Preparation does not run user code.
+    assert compute_features(payload, ["count", "total_usd", "count"]) == {"count": 2, "total_usd": 30.0}
     assert calls == ["field", "unused_field", "field", "unused_field", "count", "total"]
     assert payload == original
-    assert feature_schema(["count", "total_usd"]) == {
+    assert compile_offline(["count", "total_usd"]).output_schema == {
         "count": int,
         "total_usd": float,
     }
-
-    # The compiled plan owns its callables, independent of the registry.
-    isolated_feature_registry._features.clear()
-    assert selected({"loans": []}) == {"count": 0, "total_usd": 0.0}
 
 
 def test_single_feature_is_selected_by_published_name_and_runs_once():
@@ -73,12 +68,11 @@ def test_single_feature_is_selected_by_published_name_and_runs_once():
         calls.append("count")
         return len(rows)
 
-    selected = compile_features(["loan_count", "loan_count"])
-    assert selected({"loans": []}) == {"loan_count": 0}
+    assert compute_features({"loans": []}, ["loan_count", "loan_count"]) == {"loan_count": 0}
     assert calls == ["count"]
-    assert feature_schema(["loan_count"]) == {"loan_count": int}
+    assert compile_offline(["loan_count"]).output_schema == {"loan_count": int}
     with pytest.raises(KeyError):
-        compile_features(["count"])
+        compute_features({}, ["count"])
 
 
 def test_sources_are_independent_and_optional_objects_become_rows():
@@ -90,13 +84,17 @@ def test_sources_are_independent_and_optional_objects_become_rows():
     def report_score(rows) -> float | None:
         return float(rows[0]["score"]) if rows else None
 
-    assert compile_features()({"loans": [], "report": {"score": 720}}) == {
+    assert compute_features({"loans": [], "report": {"score": 720}}) == {
         "count_loans": 0, "report_score": 720.0,
     }
-    assert compile_features(["report_score"])({"report": None}) == {
+    assert compute_features({"report": []}, ["report_score"]) == {
         "report_score": None
     }
-    assert compile_features([])({}) == {}
+    assert compute_features({"report": None}, ["report_score"]) == {
+        "report_score": None
+    }
+    assert compute_features({}, ["report_score"]) == {"report_score": None}
+    assert compute_features({}, []) == {}
 
 
 def test_root_context_is_shared_with_fields_and_features_once_per_source():
@@ -130,7 +128,7 @@ def test_root_context_is_shared_with_fields_and_features_once_per_source():
         "device": {"id": "phone"}, "metadata": {"ignore": True}, "events": [1, 2],
     }
     original = deepcopy(payload)
-    assert compile_features()(payload) == {"total": 80, "count": 2, "device_user": "root"}
+    assert compute_features(payload) == {"total": 80, "count": 2, "device_user": "root"}
     assert field_calls == ["root", "row"]
     assert prepared_rows[0] is prepared_rows[1]
     assert prepared_rows[0] == [
@@ -142,8 +140,67 @@ def test_root_context_is_shared_with_fields_and_features_once_per_source():
     assert payload == original
 
 
-@pytest.mark.parametrize("source_rows", [[], None])
-def test_root_context_does_not_create_rows_for_empty_sources(source_rows):
+def test_each_segment_receives_root_context_from_the_deepest_segment():
+    seen = []
+
+    @field(source="loans")
+    def amount_usd(row) -> float:
+        return row["amount"] / row["local_per_usd"]
+
+    @feature(source="loans")
+    def total(rows) -> float:
+        seen.extend(rows)
+        return sum(row["amount_usd"] for row in rows)
+
+    agreement = {"agreement_id": "A1", "interest_rate": 0.08, "term": {"months": 12}}
+    payload = {
+        "user_id": "u1",
+        "as_of": "2026-10-06",
+        "local_per_usd": 7,
+        "devices": [{"device_id": "d1"}],
+        "loans": [{
+            "loan_id": "l1",
+            "amount": 700,
+            "created_at": "2026-09-26",
+            "agreement": agreement,
+            "payments": [
+                {"payment_id": "p1", "fee": {"fee_amount": 3}},
+                {"payment_id": "p2"},
+            ],
+        }],
+    }
+    original = deepcopy(payload)
+    loan = {
+        "user_id": "u1",
+        "as_of": "2026-10-06",
+        "local_per_usd": 7,
+        "loan_id": "l1",
+        "amount": 700,
+        "created_at": "2026-09-26",
+        "amount_usd": 100.0,
+        "agreement_id": "A1",
+        "interest_rate": 0.08,
+        "months": 12,
+    }
+    assert compute_features(payload, ["total"]) == {"total": 200.0}
+    assert {"loans": seen} == {"loans": [
+        {**loan, "payment_id": "p1", "fee_amount": 3},
+        {**loan, "payment_id": "p2"},
+    ]}
+    assert payload == original
+    assert payload["loans"][0]["agreement"] is agreement
+    assert "device_id" not in seen[0]
+    assert "agreement" not in seen[0]
+    assert "term" not in seen[0]
+
+
+@pytest.mark.parametrize("payload", [
+    {"user_id": "root", "loans": []},
+    {"user_id": "root", "loans": None},
+    {"user_id": "root"},
+    {"user_id": "root", "loans": ["not-a-record"]},
+])
+def test_root_context_does_not_create_rows_for_empty_sources(payload):
     @field(source="loans")
     def unused(row):
         raise AssertionError("Empty source must not run fields")
@@ -152,7 +209,80 @@ def test_root_context_does_not_create_rows_for_empty_sources(source_rows):
     def count(rows) -> int:
         return len(rows)
 
-    assert compile_features()({"user_id": "root", "loans": source_rows}) == {"count": 0}
+    assert compute_features(payload) == {"count": 0}
+
+
+def test_flatten_keeps_parent_rows_and_overrides_deeper_keys():
+    seen = []
+
+    @feature(source="loans")
+    def count(rows) -> int:
+        seen.extend(rows)
+        return len(rows)
+
+    tags = ["home", "open"]
+    payload = {
+        "user_id": "u1",
+        "loans": [
+            {
+                "loan_id": "l1",
+                "amount": 700,
+                "tags": tags,
+                "agreement": None,
+                "payments": [
+                    {"payment_id": "p1", "amount": 5, "parts": [{"part": 1}, {"part": 2}]},
+                    {"payment_id": "p2", "amount": 9},
+                ],
+            },
+            {"loan_id": "l2", "amount": 50, "payments": []},
+        ],
+    }
+    original = deepcopy(payload)
+    assert compute_features(payload, ["count"]) == {"count": 4}
+    assert seen == [
+        {
+            "user_id": "u1", "loan_id": "l1", "amount": 700, "tags": ["home", "open"],
+            "agreement": None, "payment_id": "p1", "part": 1,
+        },
+        {
+            "user_id": "u1", "loan_id": "l1", "amount": 700, "tags": ["home", "open"],
+            "agreement": None, "payment_id": "p1", "part": 2,
+        },
+        {
+            "user_id": "u1", "loan_id": "l1", "amount": 700, "tags": ["home", "open"],
+            "agreement": None, "payment_id": "p2",
+        },
+        {"user_id": "u1", "loan_id": "l2", "amount": 50, "payments": []},
+    ]
+    assert seen[0]["tags"] is not tags
+    assert payload == original
+
+    seen.clear()
+    assert compute_features({"loans": [{
+        "loan_id": "l3",
+        "payments": [{"payment_id": "p"}],
+        "fees": [{"fee": 1}, {"fee": 2}],
+    }]}, ["count"]) == {"count": 2}
+    assert seen == [
+        {"loan_id": "l3", "payment_id": "p", "fee": 1},
+        {"loan_id": "l3", "payment_id": "p", "fee": 2},
+    ]
+
+
+def test_empty_object_source_is_one_row():
+    calls = []
+
+    @field(source="report")
+    def marker(row) -> int:
+        calls.append("field")
+        return 1
+
+    @feature(source="report")
+    def count(rows) -> int:
+        return len(rows)
+
+    assert compute_features({"user_id": "u1", "report": {}}) == {"count": 1}
+    assert calls == ["field"]
 
 
 def test_decorators_leave_functions_unchanged():
@@ -175,7 +305,7 @@ def test_duplicate_outputs_fail_during_online_and_offline_compilation():
         return len(rows)
 
     with pytest.raises(ValueError, match="Duplicate feature: count"):
-        compile_features()
+        compute_features({})
     with pytest.raises(ValueError, match="Duplicate feature: count"):
         compile_offline()
 
@@ -197,7 +327,7 @@ def test_duplicate_fields_fail_during_compilation(isolated_feature_registry):
 
     assert len(isolated_feature_registry.snapshot().fields) == 2
     with pytest.raises(ValueError, match="Duplicate field"):
-        compile_features()
+        compute_features({})
     with pytest.raises(ValueError, match="Duplicate field"):
         compile_offline()
 
@@ -208,22 +338,22 @@ def test_single_feature_preserves_empty_values(returned):
     def value(rows):
         return returned
 
-    assert compile_features(["value"])({"loans": []})["value"] is returned
+    assert compute_features({"loans": []}, ["value"])["value"] is returned
 
 
 def test_unknown_selection_and_missing_type_fail_before_offline_use():
     with pytest.raises(KeyError):
-        compile_features(["missing"])
+        compute_features({}, ["missing"])
 
     @feature(source="loans")
     def untyped(rows):
         return len(rows)
 
-    assert compile_features(["untyped"])({"loans": []}) == {
+    assert compute_features({"loans": []}, ["untyped"]) == {
         "untyped": 0
     }
     with pytest.raises(TypeError, match="return annotation"):
-        feature_schema(["untyped"])
+        compile_offline(["untyped"]).output_schema
 
 
 def test_example_definitions_and_nullable_schema():
@@ -231,10 +361,9 @@ def test_example_definitions_and_nullable_schema():
     spec = importlib.util.spec_from_file_location("loan_example", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    selected = compile_features()
-    assert selected({"loans": []}) == {
+    assert compute_features({"loans": []}) == {
         "loan_count": 0,
         "loan_total_amount_usd": 0.0,
         "largest_loan_amount_usd": None,
     }
-    assert feature_schema()["largest_loan_amount_usd"] == float | None
+    assert compile_offline().output_schema["largest_loan_amount_usd"] == float | None

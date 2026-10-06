@@ -14,11 +14,11 @@ from pathlib import Path
 from statistics import median
 from time import perf_counter_ns
 
-from mirus.features.compute import compile_features, compute_features
+from mirus.features.compute import compute_features, prepare_features
 from examples.parameterized_features import dollar_amount, loan_amount
 
 FEATURE_NAMES = ["loan_credit_shopping_amount_30d", "loan_home_medical_amount_90d"]
-RUNNER = compile_features(FEATURE_NAMES)
+CATALOG = prepare_features(FEATURE_NAMES)
 
 
 def make_payload(count):
@@ -55,7 +55,7 @@ def benchmark(count, repeats, warmups):
     cases = {
         "raw_aggregation_only": lambda: raw_aggregations(prepared),
         "raw_end_to_end": lambda: raw_aggregations(prepare_rows(payload)),
-        "compiled_features": lambda: RUNNER(payload),
+        "prepared_catalog": lambda: compute_features(payload, catalog=CATALOG),
         "compute_features": lambda: compute_features(payload, feature_names=FEATURE_NAMES),
     }
     expected = raw_aggregations(prepared)

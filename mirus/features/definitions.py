@@ -20,6 +20,7 @@ class FeatureDeclaration:
     source: str
     feature_name: str | None
     function: Callable
+    # Parameter order is the expansion order. A tuple freezes the choices taken at decoration.
     parameters: tuple[tuple[str, object], ...]
 
 
@@ -27,6 +28,8 @@ class FeatureDeclaration:
 class DeclarationSnapshot:
     """Immutable view of all declarations collected before compilation."""
 
+    # Tuples keep registration order. A list stored here could still be appended to
+    # after this frozen snapshot is taken.
     fields: tuple[FieldDeclaration, ...]
     features: tuple[FeatureDeclaration, ...]
 
@@ -49,36 +52,10 @@ class CompiledFeature:
 class FeatureCatalog:
     """Prepared definitions; callers must treat the contained mappings as read-only."""
 
+    # Field order within a source is registration order, and the tuple cannot grow.
     fields_by_source: dict[str, tuple[CompiledField, ...]]
     features_by_name: dict[str, CompiledFeature]
 
     @property
     def feature_names(self) -> tuple[str, ...]:
         return tuple(self.features_by_name)
-
-
-@dataclass(frozen=True)
-class SourceSelection:
-    source: str
-    fields: tuple[CompiledField, ...]
-    features: tuple[CompiledFeature, ...]
-
-
-@dataclass(frozen=True)
-class FeatureDependency:
-    """Legacy offline metadata: all fields on the source, not inferred dependencies."""
-
-    feature_name: str
-    source: str
-    field_names: tuple[str, ...]
-
-
-@dataclass(frozen=True)
-class CompiledSelection:
-    features: tuple[CompiledFeature, ...]
-    sources: tuple[SourceSelection, ...]
-    dependencies: tuple[FeatureDependency, ...]
-
-    @property
-    def feature_names(self) -> tuple[str, ...]:
-        return tuple(feature.name for feature in self.features)

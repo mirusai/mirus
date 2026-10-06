@@ -43,17 +43,17 @@ def test_decorator_import_does_not_load_online_or_offline_runtime():
     )
 
 
-def test_registry_is_created_only_when_first_used():
+def test_registry_starts_empty_and_collects_on_decoration():
     subprocess.run(
         [
             sys.executable,
             "-c",
-            "from mirus.features.decorators import feature\n"
             "from mirus.features import registry\n"
-            "assert registry._default_registry is None\n"
+            "from mirus.features.decorators import feature\n"
+            "assert registry.default_registry.snapshot().features == ()\n"
             "@feature(source='loans')\n"
             "def count(rows) -> int: return len(rows)\n"
-            "assert registry._default_registry is not None",
+            "assert len(registry.default_registry.snapshot().features) == 1",
         ],
         check=True,
     )

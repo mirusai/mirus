@@ -1,4 +1,4 @@
-"""Lazy process-local storage for uncompiled feature declarations."""
+"""Process-local storage for uncompiled feature declarations."""
 
 from .definitions import (
     DeclarationSnapshot,
@@ -22,18 +22,11 @@ class Registry:
 
     def snapshot(self) -> DeclarationSnapshot:
         """Return an immutable input for one independent compilation."""
+        # Copy the live lists. Later registrations append to the registry, not to this snapshot.
         return DeclarationSnapshot(
             fields=tuple(self._fields),
             features=tuple(self._features),
         )
 
 
-_default_registry: Registry | None = None
-
-
-def get_default_registry() -> Registry:
-    """Create the process-local registry only when an API first needs it."""
-    global _default_registry
-    if _default_registry is None:
-        _default_registry = Registry()
-    return _default_registry
+default_registry = Registry()
