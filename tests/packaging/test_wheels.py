@@ -39,7 +39,10 @@ def test_serving_wheel_excludes_offline_files_and_runs_without_site_packages(whe
          "from pathlib import Path\n"
          "import mirus\n"
          "assert Path(mirus.__file__).resolve().parent == Path.cwd() / 'mirus'\n"
-         "from mirus import feature, prepare_features, compute_features\n"
+         "from mirus.features.decorators import feature\n"
+         "from mirus.features.compute import prepare_features, compute_features\n"
+         "assert not hasattr(mirus, 'feature')\n"
+         "assert not hasattr(mirus.features, 'compute_features')\n"
          "from mirus.payload import Payload, Field, PayloadSection\n"
          "from mirus.serving import OnlineFetcher\n"
          "assert importlib.util.find_spec('mirus.backtest') is None\n"
@@ -76,8 +79,6 @@ def test_offline_wheel_adds_only_offline_package_and_keeps_spark_lazy(wheels, tm
         [sys.executable, "-S", "-c",
          "import sys\n"
          "from mirus.backtest import OfflineFetcher, compile_offline\n"
-         "from mirus import compile_offline as public_compile\n"
-         "assert public_compile is compile_offline\n"
          "assert compile_offline().feature_names == ()\n"
          "assert 'pyspark' not in sys.modules"],
         cwd=tmp_path, env={**os.environ, "PYTHONPATH": str(tmp_path)}, check=True,

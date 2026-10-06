@@ -4,6 +4,20 @@ import subprocess
 import sys
 
 
+def test_public_apis_are_separated_by_responsibility():
+    subprocess.run(
+        [sys.executable, "-c",
+         "import mirus, mirus.features\n"
+         "from mirus.features.decorators import feature, field\n"
+         "from mirus.features.compute import compute_features, prepare_features\n"
+         "for name in ('feature', 'field', 'compute_features', 'prepare_features', 'compile_offline'):\n"
+         "    assert not hasattr(mirus, name), name\n"
+         "    assert not hasattr(mirus.features, name), name\n"
+         "assert not hasattr(__import__('mirus.features.compute', fromlist=['feature']), 'feature')\n"],
+        check=True,
+    )
+
+
 def test_online_feature_imports_do_not_load_offline_engines():
     subprocess.run(
         [sys.executable, "-c",
@@ -19,7 +33,7 @@ def test_decorator_import_does_not_load_online_or_offline_runtime():
             sys.executable,
             "-c",
             "import sys; "
-            "from mirus import feature; "
+            "from mirus.features.decorators import feature; "
             "assert 'mirus.features.compiler' not in sys.modules; "
             "assert 'mirus.features.compute' not in sys.modules; "
             "assert not any(name.startswith('mirus.backtest') "
@@ -34,7 +48,7 @@ def test_registry_is_created_only_when_first_used():
         [
             sys.executable,
             "-c",
-            "from mirus import feature\n"
+            "from mirus.features.decorators import feature\n"
             "from mirus.features import registry\n"
             "assert registry._default_registry is None\n"
             "@feature(source='loans')\n"
@@ -51,7 +65,7 @@ def test_online_feature_api_does_not_import_offline_feature_modules():
             sys.executable,
             "-c",
             "import sys; "
-            "from mirus.features import prepare_features; "
+            "from mirus.features.compute import prepare_features; "
             "assert not any(name.startswith('mirus.backtest') "
             "for name in sys.modules)",
         ],

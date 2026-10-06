@@ -21,35 +21,28 @@ of named outputs. Both use the function's return annotation for schema inspectio
 Dictionary groups and the `output_types` decorator argument are no longer supported.
 
 ```python
-from mirus.features import prepare_features, compute_features
+from mirus.features.compute import compute_features
 from examples import loan_features  # Import executes the decorators.
 
 payload = {"loans": [{"principal": 700}, {"principal": 1400}]}
 
-# No startup setup required.
 result = compute_features(payload, feature_names=["loan_count"])
+# {"loan_count": 2}
 
-# Optional startup preparation, restricted to this service's available features.
-catalog = prepare_features(["loan_count", "loan_total_amount_usd"])
-
-# Each request can choose a different subset; omitted names select this catalog.
-result = compute_features(payload, ["loan_count"], catalog=catalog)
-result = compute_features(payload, catalog=catalog)
+result = compute_features(payload, ["loan_count", "loan_total_amount_usd"])
 # {"loan_count": 2, "loan_total_amount_usd": 300.0}
 ```
 
-Customer functions can live anywhere. Import definition modules before preparing
-the catalog; decorators register declarations in the current process. mirus does
-not scan files or import arbitrary modules. Importable module-level callables can
-be serialized with the catalog. Workers computing with a supplied catalog do not
-read the registry. Arbitrary closures may require the execution engine's serializer.
+Customer functions can live anywhere. Import definition modules before computing;
+decorators register declarations in the current process. mirus does not scan files
+or import arbitrary modules. The default call handles preparation and computation.
 
 ### Package boundaries
 
 ```text
 mirusai/
 ├── mirus/
-│   ├── __init__.py        # Public API
+│   ├── __init__.py        # Package metadata only
 │   ├── features/
 │   │   ├── decorators.py # Register @field and @feature declarations
 │   │   ├── definitions.py
@@ -82,20 +75,27 @@ Online and offline use separate backend protocols and share the payload contract
 Feature execution is independent of retrieval. Spark UDF/Pandas UDF execution and
 Spark output-schema conversion are future work, not part of this refactor.
 
-Public APIs are available from `mirus.features` and `mirus`. The existing
-`compile_features(names)` convenience API still returns a callable backed by
-a prepared catalog; new code can use `prepare_features` plus `compute_features`.
-The package now uses `mirus` instead of the previous `core` import namespace.
-Use `mirus.features`, `mirus.payload`, `mirus.serving`, and `mirus.backtest` in customer code.
-Root-level `compile_offline`/`feature_schema` exports remain lazy compatibility aliases
-and require the offline distribution.
+Public imports are grouped by responsibility:
+
+| Responsibility | Import from |
+| --- | --- |
+| `feature`, `field` | `mirus.features.decorators` |
+| `compute_features` | `mirus.features.compute` |
+| Optional `prepare_features`, `compile_features` | `mirus.features.compute` |
+| `Payload` and shared contract types | `mirus.payload` |
+| `OnlineFetcher`, `MySQLConnection` | `mirus.serving` |
+| `OfflineFetcher`, `compile_offline`, `feature_schema` | `mirus.backtest` |
+
+The mixed exports from `mirus` and `mirus.features` have been removed; update
+existing imports to these modules. Computation does not import backtest code.
 
 ### Optional parameterized features
 
 One function can define multiple independently selectable features:
 
 ```python
-from mirus import feature
+from mirus.features.decorators import feature
+from mirus.features.compute import compute_features
 
 @feature(
     source="loans",
@@ -156,6 +156,23 @@ aggregation work. There is no automatic shared-scan optimization or plan caching
   coerce/validate runtime values. Spark schema conversion and UDF wrappers are
   not implemented in this first structural pass.
 
+### Optional startup preparation (advanced)
+
+Start with `compute_features(payload, feature_names=...)`. Preparation is an
+optimization, not a required setup step; use it when measurements justify it.
+
+```python
+from mirus.features.compute import compute_features, prepare_features
+from examples import loan_features
+
+catalog = prepare_features(["loan_count", "loan_total_amount_usd"])
+result = compute_features(
+    {"loans": [{"principal": 700}]},
+    feature_names=["loan_count"],
+    catalog=catalog,
+)
+```
+
 Without a catalog, `compute_features()` prepares a fresh selection on each call.
 With a catalog, it performs O(K) name lookup/grouping for K requested features,
 prepares each selected source once, and runs selected aggregations. It does not
@@ -172,7 +189,11 @@ rows as read-only. Field functions receive root context plus the raw source row,
 not outputs of other fields. Register definitions before serving, and rebuild the
 catalog when definitions change.
 
-Run `python -m examples.serve_features` for startup preparation and dynamic request
+Importable module-level callables can be serialized with the catalog. Workers
+using a supplied catalog do not read the registry; closures may require the
+execution engine's serializer.
+
+Run `python -m examples.serve_features` for direct computation with per-request
 selection. See [tests/README.md](tests/README.md) for focused suites.
 
 ## Three parts

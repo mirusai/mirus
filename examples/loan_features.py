@@ -1,6 +1,7 @@
 """Runnable standalone definitions: python -m examples.loan_features."""
 
-from mirus import compute_features, feature, field
+from mirus.features.decorators import feature, field
+from mirus.features.compute import compute_features
 
 
 @field(source="loans")

@@ -1,6 +1,7 @@
 """One function, many selectable features: python -m examples.parameterized_features."""
 
-from mirus import compute_features, feature, field
+from mirus.features.decorators import feature, field
+from mirus.features.compute import compute_features
 
 
 @field(source="loans")

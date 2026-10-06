@@ -4,7 +4,9 @@ from functools import partial
 
 import pytest
 
-from mirus import compile_features, compile_offline, feature, field, prepare_features
+from mirus.features.decorators import feature, field
+from mirus.features.compute import compile_features, prepare_features
+from mirus.backtest import compile_offline
 
 pytestmark = pytest.mark.usefixtures("isolated_feature_registry")
 

@@ -14,7 +14,7 @@ from pathlib import Path
 from statistics import median
 from time import perf_counter_ns
 
-from mirus import compile_features, compute_features
+from mirus.features.compute import compile_features, compute_features
 from examples.parameterized_features import dollar_amount, loan_amount
 
 FEATURE_NAMES = ["loan_credit_shopping_amount_30d", "loan_home_medical_amount_90d"]

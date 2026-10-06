@@ -1,11 +1,11 @@
 # How decorators become feature values
 
 mirus separates **defining a feature** from **running it**. You write ordinary
-Python functions; the library registers them, prepares a catalog, and coordinates
+Python functions; the library registers them and coordinates
 their execution for each payload.
 
 ```text
-Definition time:  @field / @feature → registry → prepare_features() → catalog
+Definition time:  @field / @feature → registry
 
 Request time:    raw payload → source rows + root context → calculated fields
                                                         → selected features → result dict
@@ -39,7 +39,8 @@ The payload can come directly from the caller or from `mirus.serving.OnlineFetch
 ```python
 from datetime import date
 
-from mirus import compute_features, feature, field, prepare_features
+from mirus.features.decorators import feature, field
+from mirus.features.compute import compute_features
 
 
 @field(source="loans")
@@ -84,26 +85,10 @@ This toy contract uses ISO date strings. Real fetchers may preserve Python
 `datetime` and `Decimal` objects; feature code must use the types agreed in the
 project's payload contract. Historical ages must be relative to `as_of`, not today.
 
-## 3. Prepare definitions, optionally at startup
-
-```python
-catalog = prepare_features()
-assert catalog.feature_names == (
-    "loan_count", "loan_amount_usd_30d", "loan_amount_usd_90d",
-)
-```
-
-Preparation validates declarations and binds parameterized callables. It does not
-execute field or feature functions or retain any request data.
-
-Pass `prepare_features(feature_names=[...])` to make only those features available.
-Restricting preparation binds only selected callables, although all declared names
-are still checked for duplicates. New definitions require a new catalog.
-
 The next two sections show intermediate data **inside a compute call**; you do not
 need to construct it yourself or call a separate flattening API.
 
-## 4. Raw payload → flat source rows
+## 3. Raw payload → flat source rows
 
 For `source="loans"`, the runtime reads `payload["loans"]` and merges root scalar
 values into each row. The intermediate rows are:
@@ -130,7 +115,7 @@ Nested objects within a row remain nested; sibling lists are not cross-joined.
 - Source-row keys override root keys on collisions.
 - The original payload is not modified.
 
-## 5. Flat rows → calculated fields
+## 4. Flat rows → calculated fields
 
 The runtime calls **every registered field for the selected source once per row**.
 Both fields see the same row plus root context; fields cannot depend on another
@@ -157,37 +142,41 @@ Calculated field keys override existing row keys. All selected features on `loan
 receive this same prepared list; they must treat it, including nested values, as
 read-only. There is no field-level dependency analysis.
 
-## 6. Prepared rows → selected features → result
+## 5. Prepared rows → selected features → result
 
 ```python
 result = compute_features(
     payload,
     feature_names=["loan_count", "loan_amount_usd_30d"],
-    catalog=catalog,
 )
 assert result == {"loan_count": 2, "loan_amount_usd_30d": 100.0}
 
-# A later request can choose a different subset of the same catalog.
-assert compute_features(payload, ["loan_amount_usd_90d"], catalog=catalog) == {
+# A later request can choose a different list of features.
+assert compute_features(payload, ["loan_amount_usd_90d"]) == {
     "loan_amount_usd_90d": 300.0,
 }
 
-# No startup preparation is required; this prepares a fresh selection each call.
-assert compute_features(payload, ["loan_count"]) == {"loan_count": 2}
+# Omitting the list computes all registered features.
+assert compute_features(payload) == {
+    "loan_count": 2, "loan_amount_usd_30d": 100.0, "loan_amount_usd_90d": 300.0,
+}
 ```
 
-For the first call, mirus looks up the two requested names, groups them under
-`loans`, prepares those source rows once, and executes the two aggregations.
-The 90-day aggregation does not run. Each new request prepares its own rows;
-the catalog reuses definitions, not computed values.
+For the first call, `compute_features()` validates the registered definitions,
+resolves the two requested names, groups them under `loans`, prepares those source
+rows once, and executes the two aggregations. The 90-day aggregation does not run.
+Each new request prepares its own definitions and rows; feature values are not cached.
 
-Omitting `feature_names` computes everything available in the supplied catalog.
-An empty list computes nothing. A name outside the catalog raises `KeyError`.
-Unused sources are not prepared. With a catalog, selection is O(K) for K requested
-features; if each aggregation scans N rows, aggregation work remains O(K × N).
-Shared row preparation does not imply shared aggregation scans.
+Omitting `feature_names` computes all registered features. An empty list computes
+nothing. Unknown names raise `KeyError`. Unused sources are not prepared.
+If each selected aggregation scans N rows, K aggregations still perform O(K × N)
+work: sharing row preparation does not combine their aggregation scans.
 
-## 7. How backtesting reuses the same logic
+`compute_features()` includes definition preparation on every call. Optional
+startup preparation remains available for latency-sensitive services, but is not
+required for this usage pattern; see the main README's advanced section.
+
+## 6. How backtesting reuses the same logic
 
 There is no second set of feature formulas for Spark. The intended distinction is
 **how the payload is retrieved and how many payloads are processed**, not how a
@@ -218,7 +207,7 @@ assert offline_plan.features_by_source["loans"][1].function.keywords == {"days":
 The last callable is a `functools.partial` of the original function—not a rewritten
 SQL implementation. Return annotations supply Python output types for offline
 metadata; they do not validate or coerce runtime values. `OfflinePlan` is metadata,
-not an executable Spark job or a catalog accepted by `compute_features()`.
+not an executable Spark job or a payload accepted by `compute_features()`.
 
 ### Available today: historical payload retrieval
 
@@ -254,11 +243,12 @@ Offline:  driver + warehouse → SparkFetcher PIT payloads
                              [adapter not implemented yet]
 ```
 
-The future adapter must convert Spark payload structs to the agreed Python shape,
-deliver prepared callables to workers, and map output annotations to a Spark schema.
-Workers will invoke the same `compute_features(payload, names, catalog=catalog)`;
-request-time computation with a catalog does not depend on the worker registry.
-Customer feature modules and their dependencies must still be available on workers.
+The future adapter must convert Spark payload structs to the agreed Python shape
+and map output annotations to a Spark schema. Workers use the same feature
+computation as `compute_features(payload, feature_names=names)`, not rewritten
+SQL formulas. Definition preparation can be reused internally by that adapter;
+users do not need to manage it in their feature code. Customer feature modules
+and their dependencies must still be available on workers.
 
 This execution adapter and automatic Spark schema conversion are **not implemented
 yet**. A Pandas UDF would provide batched transport; it would not automatically
@@ -273,7 +263,7 @@ Run each demo separately from the repository root:
 | --- | --- |
 | `python -m examples.loan_features` | Single-output features and direct computation |
 | `python -m examples.parameterized_features` | Feature families and selecting concrete output names |
-| `python -m examples.serve_features` | Optional startup preparation and different selections per request |
+| `python -m examples.serve_features` | A serving function with different selections per request |
 
 The feature definition demos register overlapping names, so do not import both
 into the same application. The serving demo imports only `loan_features`.

@@ -5,22 +5,17 @@ import sys
 
 import pytest
 
-from mirus import (
-    OfflinePlan,
-    compile_features,
-    compile_offline,
-    compute_features,
-    feature,
-    feature_schema,
-    field,
-)
+from mirus.features.decorators import feature, field
+from mirus.features.compute import compile_features, compute_features
+from mirus.backtest import OfflinePlan, compile_offline, feature_schema
 
 pytestmark = pytest.mark.usefixtures("isolated_feature_registry")
 
 
 def test_public_api_exports_come_from_isolated_modules():
     from mirus import backtest
-    from mirus.features import compute, compiler, decorators, prepare_features
+    from mirus.features import compute, compiler, decorators
+    from mirus.features.compute import prepare_features
 
     assert compile_features is compute.compile_features
     assert compute_features is compute.compute_features
@@ -160,7 +155,7 @@ def test_customer_module_registers_on_import_only(tmp_path, monkeypatch):
     # Simulate customer-owned code outside the installed mirus package.
     module_name = "customer_loan_features"
     (tmp_path / f"{module_name}.py").write_text(
-        "from mirus import feature\n"
+        "from mirus.features.decorators import feature\n"
         "@feature(source='loans')\n"
         "def customer_count(rows) -> int:\n"
         "    return len(rows)\n"

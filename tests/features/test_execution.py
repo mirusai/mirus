@@ -6,13 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from mirus import (
-    compile_features,
-    compile_offline,
-    feature,
-    feature_schema,
-    field,
-)
+from mirus.features.decorators import feature, field
+from mirus.features.compute import compile_features
+from mirus.backtest import compile_offline, feature_schema
 
 pytestmark = pytest.mark.usefixtures("isolated_feature_registry")
 

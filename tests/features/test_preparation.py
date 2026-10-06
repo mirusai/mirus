@@ -5,7 +5,8 @@ from unittest.mock import patch
 
 import pytest
 
-from mirus import compute_features, feature, field, prepare_features
+from mirus.features.decorators import feature, field
+from mirus.features.compute import compute_features, prepare_features
 
 pytestmark = pytest.mark.usefixtures("isolated_feature_registry")
 

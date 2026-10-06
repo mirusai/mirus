@@ -7,6 +7,8 @@ from typing import Any
 from .compiler import prepare_features
 from .definitions import FeatureCatalog
 
+__all__ = ["compute_features", "prepare_features", "compile_features"]
+
 
 def compute_features(
     payload: dict[str, Any],

@@ -15,7 +15,8 @@ from statistics import median
 from time import perf_counter_ns
 from unittest.mock import patch
 
-from mirus import prepare_features, compute_features, feature, field
+from mirus.features.decorators import feature, field
+from mirus.features.compute import prepare_features, compute_features
 from mirus.features import registry
 
 def register_catalog(combinations):

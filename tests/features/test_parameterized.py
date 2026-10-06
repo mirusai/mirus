@@ -2,14 +2,9 @@
 
 import pytest
 
-from mirus import (
-    compile_features,
-    compile_offline,
-    compute_features,
-    feature,
-    feature_schema,
-    field,
-)
+from mirus.features.decorators import feature, field
+from mirus.features.compute import compile_features, compute_features
+from mirus.backtest import compile_offline, feature_schema
 
 pytestmark = pytest.mark.usefixtures("isolated_feature_registry")
 
