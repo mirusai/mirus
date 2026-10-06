@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mirus-backtest"
+version = "0.1.0"
+description = "Offline payload retrieval and feature metadata for mirus"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+dependencies = ["mirus==0.1.0"]
+
+[project.urls]
+Repository = "https://github.com/mirusai/mirus"
+
+[project.optional-dependencies]
+spark = ["pyspark>=3.5,<4"]
+
+[tool.setuptools]
+packages = ["mirus.backtest", "mirus.backtest.spark"]
+package-dir = { "mirus.backtest" = "." }

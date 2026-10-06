@@ -1,0 +1,80 @@
+{
+  "observation_id": "application-123",
+  "tenant_id": "tenant-1",
+  "user_id": "user-42",
+  "as_of": "2026-10-05T12:00:00Z",
+  "loans": [
+    {
+      "tenant_id": "tenant-1",
+      "loan_id": "loan-1",
+      "borrower_id": "user-42",
+      "agreement_id": "agreement-1",
+      "principal": "10000.00",
+      "createdat": "2026-10-01T09:00:00Z",
+      "agreement": {
+        "tenant_id": "tenant-1",
+        "agreement_id": "agreement-1",
+        "term_months": 12,
+        "interest_rate": "0.085000",
+        "createdat": "2026-10-01T09:00:00Z"
+      }
+    },
+    {
+      "tenant_id": "tenant-1",
+      "loan_id": "loan-2",
+      "borrower_id": "user-42",
+      "agreement_id": "agreement-2",
+      "principal": "2500.00",
+      "createdat": "2026-10-01T09:00:00Z",
+      "agreement": {
+        "tenant_id": "tenant-1",
+        "agreement_id": "agreement-2",
+        "term_months": 6,
+        "interest_rate": "0.070000",
+        "createdat": "2026-10-01T09:00:00Z"
+      }
+    }
+  ],
+  "devices": [
+    {
+      "tenant_id": "tenant-1",
+      "user_id": "user-42",
+      "device_id": "device-1",
+      "device_type": "mobile",
+      "createdat": "2026-10-01T09:00:00Z"
+    },
+    {
+      "tenant_id": "tenant-1",
+      "user_id": "user-42",
+      "device_id": "device-2",
+      "device_type": "desktop",
+      "createdat": "2026-10-01T09:00:00Z"
+    }
+  ],
+  "login_behavior": [
+    {
+      "tenant_id": "tenant-1",
+      "login_id": "login-1",
+      "user_id": "user-42",
+      "ip_address": "192.0.2.10",
+      "createdat": "2026-10-01T09:00:00Z"
+    },
+    {
+      "tenant_id": "tenant-1",
+      "login_id": "login-2",
+      "user_id": "user-42",
+      "ip_address": "192.0.2.20",
+      "createdat": "2026-10-01T09:00:00Z"
+    }
+  ],
+  "third_party_data": [
+    {
+      "tenant_id": "tenant-1",
+      "report_id": "report-1",
+      "user_id": "user-42",
+      "provider": "demo_bureau",
+      "score": 720.0,
+      "createdat": "2026-10-01T09:00:00Z"
+    }
+  ]
+}

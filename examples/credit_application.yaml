@@ -1,0 +1,115 @@
+name: credit_application
+version: 1
+
+payload:
+  source: request
+
+  fields:
+    observation_id: {type: string, primary_key: true}
+    tenant_id: {type: string}
+    user_id: {type: string}
+    as_of: {type: timestamp, observation_time: true}
+
+  loans:
+    db:
+      table: lending.loan_record
+    dwh:
+      table: lending_history.loan_record
+      # mutations_table: lending_history.loan_record_changes
+
+    relationship:
+      type: one-to-many
+      on:
+        tenant_id: tenant_id
+        user_id: borrower_id
+
+    fields:
+      tenant_id: {type: string, primary_key: true}
+      loan_id: {type: string, primary_key: true}
+      borrower_id: {type: string}
+      agreement_id: {type: string}
+      principal: {type: "decimal(18,2)"}
+      createdat: {type: timestamp, available_at: true}
+
+    field_mapping:
+      borrower_id: customer_id
+      principal: loan_amount
+      createdat: created_at
+
+    agreement:
+      db:
+        table: lending.loan_agreement
+      dwh:
+        table: lending_history.loan_agreement
+
+      relationship:
+        type: many-to-one
+        on:
+          tenant_id: tenant_id
+          agreement_id: agreement_id
+
+      fields:
+        tenant_id: {type: string, primary_key: true}
+        agreement_id: {type: string, primary_key: true}
+        term_months: {type: int32}
+        interest_rate: {type: "decimal(10,6)"}
+        createdat: {type: timestamp, available_at: true}
+
+  devices:
+    db:
+      table: lending.user_device
+    dwh:
+      table: lending_history.user_device
+
+    relationship:
+      type: one-to-many
+      on:
+        tenant_id: tenant_id
+        user_id: user_id
+
+    fields:
+      tenant_id: {type: string, primary_key: true}
+      user_id: {type: string, primary_key: true}
+      device_id: {type: string, primary_key: true}
+      device_type: {type: string}
+      createdat: {type: timestamp, available_at: true}
+
+  login_behavior:
+    db:
+      table: lending.login_event
+    dwh:
+      table: lending_history.login_event
+
+    relationship:
+      type: one-to-many
+      on:
+        tenant_id: tenant_id
+        user_id: user_id
+
+    fields:
+      tenant_id: {type: string, primary_key: true}
+      login_id: {type: string, primary_key: true}
+      user_id: {type: string}
+      ip_address: {type: string}
+      createdat: {type: timestamp, available_at: true}
+
+  third_party_data:
+    # Stored reports, not live calls to an external provider.
+    db:
+      table: lending.third_party_report
+    dwh:
+      table: lending_history.third_party_report
+
+    relationship:
+      type: one-to-many
+      on:
+        tenant_id: tenant_id
+        user_id: user_id
+
+    fields:
+      tenant_id: {type: string, primary_key: true}
+      report_id: {type: string, primary_key: true}
+      user_id: {type: string}
+      provider: {type: string}
+      score: {type: float64}
+      createdat: {type: timestamp, available_at: true}

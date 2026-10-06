@@ -1,0 +1,16 @@
+.venv/
+.pytest_cache/
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.cache/
+.spark-warehouse/
+derby.log
+metastore_db/
+.env
+.env.*
+!.env.example
+.DS_Store
+.drafts/
