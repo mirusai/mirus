@@ -1,6 +1,6 @@
 # mirus
 
-Runs shared feature logic across distributed offline computation and real-time inference.
+Runs shared feature logic across distributed offline computation and real-time inference within millionseconds.
 
 The same Python functions serve a live request and an offline job. This repository is a design-stage library. Licensed under the [MIT License](LICENSE).
 
@@ -8,8 +8,8 @@ The same Python functions serve a live request and an offline job. This reposito
 
 | | Online | Offline |
 | --- | --- | --- |
-| Feature logic | Python | The same Python functions |
-| Payload retrieval | MySQL, current state | Spark, as of each observation |
+| Engine | Python | Spark |
+| Storage | MySQL | Hive |
 
 `compute_features` runs the functions on a nested payload. `OnlineFetcher` loads that payload from MySQL. `OfflineFetcher` builds it in Spark. Python computes the feature values in both cases.
 
