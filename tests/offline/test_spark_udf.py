@@ -33,15 +33,15 @@ def test_normalization_preserves_nested_shape_types_and_input():
     loans = np.array([{"amount": Decimal("7.00"), "agreement": {"term": np.int64(12)},
                        "payments": np.array([{"at": timestamp}, {"at": pd.NaT}])}], dtype=object)
     raw = {"as_of": timestamp, "loans": loans, "empty": np.array([], dtype=object),
-           "missing": None, "id": np.int64(2**53 + 1)}
+           "missing": None, "id": "9007199254740995", "count": np.int64(42)}
     normalized = _normalize(raw)
     assert normalized == {"as_of": datetime(2026, 1, 1), "loans": [
         {"amount": Decimal("7.00"), "agreement": {"term": 12},
          "payments": [{"at": datetime(2026, 1, 1)}, {"at": None}]}],
-        "empty": [], "missing": None, "id": 2**53 + 1}
+        "empty": [], "missing": None, "id": "9007199254740995", "count": 42}
     assert raw["loans"] is loans
     assert isinstance(raw["loans"][0]["payments"], np.ndarray)
-    assert type(normalized["id"]) is int
+    assert type(normalized["count"]) is int
 
 
 def test_invalid_method_and_empty_selection_do_not_build_udfs():

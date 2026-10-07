@@ -55,8 +55,9 @@ def score_payloads(
     """Return observation columns plus selected features; no Spark action is run.
 
     Input has a non-null `payload` struct. Both paths serialize the prepared
-    catalog, never the Spark session, frame, YAML or registry. Spark/Arrow scalar
-    coercion is unchanged; large nullable integers may lose precision.
+    catalog, never the Spark session, frame, YAML or registry. IDs must arrive as
+    strings; exact integer inputs and results must be within +/-2**53. These
+    contract assumptions are not checked or coerced at runtime.
     """
     if method not in ("arrow", "pandas"):
         raise ValueError("method must be 'arrow' or 'pandas'")

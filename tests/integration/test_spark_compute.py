@@ -50,8 +50,8 @@ def feature_names():
         return len(rows)
 
     @feature(source="loans")
-    def exact_id(rows) -> int | None:
-        return rows[0]["large_id"] if rows else None
+    def exact_id(rows) -> str | None:
+        return rows[0]["external_id"] if rows else None
 
     @feature(source="loans")
     def latest(rows) -> datetime | None:
@@ -79,14 +79,14 @@ def test_nested_batches_match_online_with_empty_and_null_sources(spark, method):
             "agreement": {"version": 12},
             "payments": [{"amount": Decimal("1.00")}, {"amount": Decimal("2.00")}]}
     payloads = [
-        {"as_of": as_of, "large_id": 42, "loans": [loan]},
-        {"as_of": as_of, "large_id": None, "loans": [loan]},
-        {"as_of": as_of, "large_id": 7, "loans": []},
-        {"as_of": as_of, "large_id": None, "loans": None},
-        {"as_of": as_of, "large_id": 9, "loans": [{**loan, "agreement": None, "payments": []}]},
+        {"as_of": as_of, "external_id": "9007199254740995", "loans": [loan]},
+        {"as_of": as_of, "external_id": None, "loans": [loan]},
+        {"as_of": as_of, "external_id": "7", "loans": []},
+        {"as_of": as_of, "external_id": None, "loans": None},
+        {"as_of": as_of, "external_id": "9", "loans": [{**loan, "agreement": None, "payments": []}]},
     ]
     frame = spark.createDataFrame(list(enumerate(payloads)),
-        "id long, payload struct<as_of:timestamp,large_id:long,loans:array<struct<"
+        "id long, payload struct<as_of:timestamp,external_id:string,loans:array<struct<"
         "amount:decimal(18,2),createdat:timestamp,agreement:struct<version:long>,"
         "payments:array<struct<amount:decimal(18,2)>>>>> ").repartition(2)
     plan = compile_offline(names)
@@ -169,20 +169,3 @@ def test_backtest_empty_selection_skips_missing_tables_and_udf(spark, monkeypatc
     assert result.columns == ["user_id", "as_of"]
     assert [row.user_id for row in result.collect()] == ["U1"]
     assert "EvalPython" not in result._jdf.queryExecution().executedPlan().toString()
-
-
-@pytest.mark.parametrize("method", ["arrow", "pandas"])
-@pytest.mark.xfail(strict=True, reason="Deferred: Arrow/pandas can round large integers inside nullable structs")
-def test_known_large_nullable_integer_precision_limit(spark, method):
-    from mirus.backtest.spark.udf import score_payloads
-
-    @feature(source="loans")
-    def version(rows) -> int | None:
-        return rows[0]["agreement"]["version"] if rows[0]["agreement"] else None
-
-    frame = spark.createDataFrame([
-        (1, {"loans": [{"agreement": {"version": 2**53 + 3}}]}),
-        (2, {"loans": [{"agreement": None}]}),
-    ], "id long, payload struct<loans:array<struct<agreement:struct<version:long>>>>").coalesce(1)
-    result = score_payloads(frame, compile_offline(), method=method)
-    assert {row.id: row.version for row in result.collect()} == {1: 2**53 + 3, 2: None}

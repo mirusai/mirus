@@ -122,9 +122,11 @@ stay pure Python, even in the pandas path—batching does not vectorize their lo
 
 The Arrow UDF uses `asDict(recursive=True)`. The pandas UDF normalizes nested
 arrays to lists and pandas timestamps to Python datetimes, without inspecting or
-rewriting the input schema. Spark/Arrow scalar coercion is unchanged: large nullable
-integers can lose precision on input or output. Exact numeric identifiers in such
-payloads are a known limitation; there is no integer-transport workaround for now.
+rewriting the input schema. For offline computation, identifiers must arrive as
+strings before entering Spark. Exact integer inputs and results must stay within
+`-2**53` to `2**53`; larger integers can lose precision during nullable
+Spark/Arrow/pandas conversion. This is a data contract, not a runtime validation
+or automatic ID conversion.
 
 Return annotations map `int`, `float`, `bool`, `str`, `bytes`, `date`, `datetime`, and
 their optional forms to nullable Spark columns. Python integers use Spark `long`.

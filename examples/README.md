@@ -330,8 +330,10 @@ instance for different selections; the original payload contract is not modified
 
 The Arrow scalar UDF uses `asDict(recursive=True)` to convert nested Rows. The
 pandas UDF receives dictionaries and arrays and normalizes containers and timestamps
-without input-schema conversion. Large nullable integers can lose precision in
-Spark/Arrow input or output conversion; support for this case is deferred.
+without input-schema conversion. IDs must arrive as strings before entering Spark;
+exact integer inputs and results must stay within `-2**53` to `2**53`. Larger
+integers are outside the offline precision contract; no runtime range checking
+or automatic ID conversion is added.
 The pandas path loops through observations; users do not rewrite features as
 pandas operations. Customer feature modules and dependencies must be installed on
 workers. Matching logic also requires matching input types, UTC reference times and
