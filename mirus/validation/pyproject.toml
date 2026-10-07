@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mirus-validation"
+version = "0.1.0"
+description = "Development and CI validation for mirus project definitions"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+dependencies = ["mirus==0.1.0"]
+
+[project.urls]
+Repository = "https://github.com/mirusai/mirus"
+
+[tool.setuptools]
+packages = ["mirus.validation"]
+package-dir = { "mirus.validation" = "." }

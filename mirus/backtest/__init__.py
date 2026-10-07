@@ -1,7 +1,7 @@
-"""Optional offline retrieval and feature metadata; backends load lazily."""
+"""Optional historical feature computation; backends load lazily."""
 
 from .compiler import compile_offline
-from .interface import OfflineBackend, OfflineFetcher
+from .interface import Backtest
 from .plan import OfflinePlan
 
-__all__ = ["OfflineBackend", "OfflineFetcher", "OfflinePlan", "compile_offline"]
+__all__ = ["Backtest", "OfflinePlan", "compile_offline"]

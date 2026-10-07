@@ -1,15 +1,14 @@
-"""Integration test for the nested payload produced by OfflineFetcher."""
+"""Integration test for the nested payload produced by SparkFetcher."""
 
 import os
-from contextlib import redirect_stdout
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 
 import pytest
 
-from mirus.backtest import OfflineFetcher
 from mirus.payload import Payload
+from mirus.validation import validate_payload
 
 try:
     from pyspark.sql import SparkSession
@@ -17,9 +16,7 @@ except ImportError:
     SparkSession = None
 
 
-ROOT = Path(__file__).resolve().parents[2]
-EXAMPLE = ROOT / "examples" / "credit_application.yaml"
-OUTPUT = ROOT / ".cache" / "offline_payload.log"
+PAYLOAD_YAML = Path(__file__).resolve().parents[1] / "fixtures/payload.yaml"
 AS_OF = datetime(2026, 10, 5, 12, 0)
 CREATED = datetime(2026, 10, 1, 9, 0)
 pytestmark = pytest.mark.skipif(
@@ -51,7 +48,9 @@ class TestOfflineSparkIntegration:
         self.spark.createDataFrame(rows, columns).createOrReplaceTempView(name)
 
     def test_constructs_complete_nested_payload_cell(self):
-        payload = Payload.from_yaml(EXAMPLE).validate()
+        from mirus.backtest.spark.fetcher import SparkFetcher
+
+        payload = validate_payload(Payload.from_yaml(PAYLOAD_YAML))
         sections = payload.root.children
 
         # Temporary views keep the integration test isolated from a warehouse.
@@ -149,11 +148,7 @@ class TestOfflineSparkIntegration:
             ["observation_id", "tenant_id", "user_id", "as_of"],
         )
 
-        frame = OfflineFetcher(payload, self.spark).fetch(driver)
-        OUTPUT.parent.mkdir(exist_ok=True)
-        with OUTPUT.open("w", encoding="utf-8") as log, redirect_stdout(log):
-            frame.printSchema()
-            frame.show(truncate=False, vertical=True)
+        frame = SparkFetcher(payload, self.spark).fetch(driver)
         result = frame.collect()
 
         assert len(result) == 1

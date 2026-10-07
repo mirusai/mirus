@@ -1,10 +1,6 @@
 """Process-local storage for uncompiled feature declarations."""
 
-from .definitions import (
-    DeclarationSnapshot,
-    FeatureDeclaration,
-    FieldDeclaration,
-)
+from .definitions import FeatureDeclaration, FieldDeclaration
 
 
 class Registry:
@@ -20,13 +16,10 @@ class Registry:
     def register_feature(self, declaration: FeatureDeclaration) -> None:
         self._features.append(declaration)
 
-    def snapshot(self) -> DeclarationSnapshot:
-        """Return an immutable input for one independent compilation."""
+    def snapshot(self) -> tuple[tuple[FieldDeclaration, ...], tuple[FeatureDeclaration, ...]]:
+        """Copy both declaration lists for independent preparation or validation."""
         # Copy the live lists. Later registrations append to the registry, not to this snapshot.
-        return DeclarationSnapshot(
-            fields=tuple(self._fields),
-            features=tuple(self._features),
-        )
+        return tuple(self._fields), tuple(self._features)
 
 
 default_registry = Registry()

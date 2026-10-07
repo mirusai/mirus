@@ -1,10 +1,5 @@
-"""An executable example: YAML -> Payload -> nested data from mocked DB rows.
+"""Payload parsing and nested retrieval from mocked MySQL rows."""
 
-Run after installing mirus: pytest
-This exercises the real loader and OnlineFetcher, not a live MySQL database.
-"""
-
-import json
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -14,12 +9,11 @@ import pytest
 
 from mirus.serving import MySQLConnection, OnlineFetcher
 from mirus.payload import Field, JoinKey, Payload, PayloadSection, Relationship
+from mirus.validation import validate_payload
 
-ROOT = Path(__file__).resolve().parents[2]
-EXAMPLE = ROOT / "examples" / "credit_application.yaml"
-EXPECTED = ROOT / "examples" / "credit_application.payload.json"
+PAYLOAD_YAML = Path(__file__).resolve().parents[1] / "fixtures/payload.yaml"
 NOW = datetime(2026, 10, 5, 12, 0, tzinfo=timezone.utc)
-CREATED = datetime(2026, 10, 1, 9, 0)  # DB timestamps are UTC in this example.
+CREATED = datetime(2026, 10, 1, 9, 0)  # DB timestamps are UTC.
 
 
 def database_rows():
@@ -50,17 +44,7 @@ def database_rows():
     ]
 
 
-def json_value(value):
-    """Display adapter only: runtime payloads keep datetime and Decimal values."""
-    if isinstance(value, datetime):
-        utc = value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
-        return utc.isoformat().replace("+00:00", "Z")
-    if isinstance(value, Decimal):
-        return str(value)  # Do not lose financial precision by casting to float.
-    raise TypeError(type(value).__name__)
-
-
-class TestPayloadDemo:
+class TestPayloadMySQL:
     def test_mysql_connection_warm_up_configures_serving_session(self):
         connection = MagicMock()
         cursor = connection.cursor.return_value.__enter__.return_value
@@ -75,9 +59,9 @@ class TestPayloadDemo:
         connection.rollback.assert_called_once_with()
 
     def test_yaml_becomes_one_payload_with_sibling_sections(self):
-        payload = Payload.from_yaml(EXAMPLE)
-        assert payload.validate() is payload
-        assert payload.name == "credit_application"
+        payload = Payload.from_yaml(PAYLOAD_YAML)
+        assert validate_payload(payload) is payload
+        assert payload.name == "test_payload"
         assert list(payload.root.children) == [
             "loans", "devices", "login_behavior", "third_party_data",
         ]
@@ -93,7 +77,7 @@ class TestPayloadDemo:
         assert not agreement.is_collection
 
     def test_ast_normalizes_fields_and_warehouse_mapping(self):
-        payload = Payload.from_yaml(EXAMPLE).validate()
+        payload = validate_payload(Payload.from_yaml(PAYLOAD_YAML))
         sections = [payload.root]
         while sections:
             section = sections.pop()
@@ -105,6 +89,8 @@ class TestPayloadDemo:
             sections.extend(section.children.values())
 
         loans = payload.root.children["loans"]
+        assert loans.db_table == "lending.loan_record"
+        assert loans.dwh_table == "lending_history.loan_record"
         assert loans.fields["principal"].data_type == "decimal(18,2)"
         assert loans.fields["principal"].dwh_column == "loan_amount"
         assert loans.fields["borrower_id"].dwh_column == "customer_id"
@@ -115,19 +101,19 @@ class TestPayloadDemo:
         assert payload.root.relationship is None
 
     def test_validation_checks_typed_join_references(self):
-        payload = Payload.from_yaml(EXAMPLE)
+        payload = Payload.from_yaml(PAYLOAD_YAML)
         payload.root.children["devices"].relationship.keys[0].child = "missing_column"
         with pytest.raises(ValueError, match="payload.devices: join keys"):
-            payload.validate()
+            validate_payload(payload)
 
     def test_validation_checks_typed_timestamp_fields(self):
-        payload = Payload.from_yaml(EXAMPLE)
+        payload = Payload.from_yaml(PAYLOAD_YAML)
         payload.root.fields["as_of"].data_type = "string"
         with pytest.raises(ValueError, match="timestamp marked observation_time"):
-            payload.validate()
+            validate_payload(payload)
 
     def test_fetch_produces_the_expected_nested_payload(self):
-        payload = Payload.from_yaml(EXAMPLE).validate()
+        payload = validate_payload(Payload.from_yaml(PAYLOAD_YAML))
         connection = MagicMock()
         cursor = connection.cursor.return_value.__enter__.return_value
         cursor.fetchall.side_effect = database_rows()
@@ -140,10 +126,36 @@ class TestPayloadDemo:
                 "user_id": "user-42",
             })
 
-        # Compare the WHOLE payload, including list ordering and nested parents.
-        display = json.loads(json.dumps(data, default=json_value))
-        with EXPECTED.open(encoding="utf-8") as file:
-            assert display == json.load(file)
+        # Compare native values, including sibling lists and each nested parent.
+        assert data == {
+            "observation_id": "application-123", "tenant_id": "tenant-1",
+            "user_id": "user-42", "as_of": NOW.replace(tzinfo=None),
+            "loans": [
+                {"tenant_id": "tenant-1", "loan_id": f"loan-{index}",
+                 "borrower_id": "user-42", "agreement_id": f"agreement-{index}",
+                 "principal": Decimal(principal), "createdat": CREATED,
+                 "agreement": {"tenant_id": "tenant-1", "agreement_id": f"agreement-{index}",
+                               "term_months": term, "interest_rate": Decimal(rate),
+                               "createdat": CREATED}}
+                for index, principal, term, rate in [
+                    (1, "10000.00", 12, "0.085000"), (2, "2500.00", 6, "0.070000")
+                ]
+            ],
+            "devices": [
+                {"tenant_id": "tenant-1", "user_id": "user-42", "device_id": f"device-{index}",
+                 "device_type": kind, "createdat": CREATED}
+                for index, kind in [(1, "mobile"), (2, "desktop")]
+            ],
+            "login_behavior": [
+                {"tenant_id": "tenant-1", "login_id": f"login-{index}", "user_id": "user-42",
+                 "ip_address": address, "createdat": CREATED}
+                for index, address in [(1, "192.0.2.10"), (2, "192.0.2.20")]
+            ],
+            "third_party_data": [
+                {"tenant_id": "tenant-1", "report_id": "report-1", "user_id": "user-42",
+                 "provider": "demo_bureau", "score": 720.0, "createdat": CREATED}
+            ],
+        }
         assert isinstance(data["loans"][0]["principal"], Decimal)
         assert isinstance(data["as_of"], datetime)
 
@@ -155,6 +167,3 @@ class TestPayloadDemo:
             "tenant-1", "user-42", NOW.replace(tzinfo=None)
         )
         connection.rollback.assert_called_once()
-
-        print("\nFetched payload (JSON display; dates/decimals serialized):")
-        print(json.dumps(display, indent=2))

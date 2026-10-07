@@ -1,107 +1,73 @@
-name: credit_application
+name: test_payload
 version: 1
-
 payload:
   source: request
-
   fields:
     observation_id: {type: string, primary_key: true}
     tenant_id: {type: string}
     user_id: {type: string}
     as_of: {type: timestamp, observation_time: true}
-
   loans:
     mutable: false
     db: lending.loan_record
     dwh: lending_history.loan_record
-    # With mutable: true, use a complete historical snapshot table here and
-    # mark the version timestamp below (for example, updatedat).
-
     relationship:
       type: one-to-many
-      on:
-        tenant_id: tenant_id
-        user_id: borrower_id
-
+      on: {tenant_id: tenant_id, user_id: borrower_id}
     fields:
       tenant_id: {type: string, primary_key: true}
       loan_id: {type: string, primary_key: true}
       borrower_id: {type: string}
       agreement_id: {type: string}
-      principal: {type: "decimal(18,2)"}
+      principal: {type: 'decimal(18,2)'}
       createdat: {type: timestamp, available_at: true}
-
     field_mapping:
       borrower_id: customer_id
       principal: loan_amount
       createdat: created_at
-
     agreement:
       mutable: false
       db: lending.loan_agreement
       dwh: lending_history.loan_agreement
-
       relationship:
         type: many-to-one
-        on:
-          tenant_id: tenant_id
-          agreement_id: agreement_id
-
+        on: {tenant_id: tenant_id, agreement_id: agreement_id}
       fields:
         tenant_id: {type: string, primary_key: true}
         agreement_id: {type: string, primary_key: true}
         term_months: {type: int32}
-        interest_rate: {type: "decimal(10,6)"}
+        interest_rate: {type: 'decimal(10,6)'}
         createdat: {type: timestamp, available_at: true}
-
   devices:
-    mutable: false
     db: lending.user_device
     dwh: lending_history.user_device
-
     relationship:
       type: one-to-many
-      on:
-        tenant_id: tenant_id
-        user_id: user_id
-
+      on: {tenant_id: tenant_id, user_id: user_id}
     fields:
       tenant_id: {type: string, primary_key: true}
       user_id: {type: string, primary_key: true}
       device_id: {type: string, primary_key: true}
       device_type: {type: string}
       createdat: {type: timestamp, available_at: true}
-
   login_behavior:
-    mutable: false
     db: lending.login_event
     dwh: lending_history.login_event
-
     relationship:
       type: one-to-many
-      on:
-        tenant_id: tenant_id
-        user_id: user_id
-
+      on: {tenant_id: tenant_id, user_id: user_id}
     fields:
       tenant_id: {type: string, primary_key: true}
       login_id: {type: string, primary_key: true}
       user_id: {type: string}
       ip_address: {type: string}
       createdat: {type: timestamp, available_at: true}
-
   third_party_data:
-    mutable: false
-    # Stored reports, not live calls to an external provider.
     db: lending.third_party_report
     dwh: lending_history.third_party_report
-
     relationship:
       type: one-to-many
-      on:
-        tenant_id: tenant_id
-        user_id: user_id
-
+      on: {tenant_id: tenant_id, user_id: user_id}
     fields:
       tenant_id: {type: string, primary_key: true}
       report_id: {type: string, primary_key: true}

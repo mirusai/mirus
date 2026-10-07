@@ -53,19 +53,19 @@ def make_payload(count, selection):
 def benchmark(rows, combinations, repeats, warmups, selection):
     names = [name for name, _, _ in selection]
     payload = make_payload(rows, selection)
-    prepared = prepare_features()
+    prepared = prepare_features(names)
     expected = {
         name: sum((float(row["amount"]) / 7 for row in payload["loans"]
                    if row["loan_type"] == loan_type and 0 <= row["age_days"] < days), 0.0)
         for name, loan_type, days in selection
     }
     cases = {
-        "compile_only": lambda: prepare_features(names),
-        "execute_only": lambda: compute_features(payload, names, catalog=prepared),
-        "combined": lambda: compute_features(payload, feature_names=names),
+        "prepare_only": lambda: prepare_features(names),
+        "prepared_fixed_compute": lambda: compute_features(payload, catalog=prepared),
+        "prepare_and_compute": lambda: compute_features(payload, feature_names=names),
     }
     assert len(expected) == len(names)
-    assert compute_features(payload, names, catalog=prepared) == compute_features(payload, feature_names=names) == expected
+    assert compute_features(payload, catalog=prepared) == compute_features(payload, feature_names=names) == expected
     for function in cases.values():
         for _ in range(warmups):
             function()
@@ -79,8 +79,8 @@ def benchmark(rows, combinations, repeats, warmups, selection):
             start = perf_counter_ns()
             result = cases[name]()
             samples[name].append((perf_counter_ns() - start) / 1_000_000)
-            if name == "compile_only":
-                assert list(result.feature_names) == names
+            if name == "prepare_only":
+                assert list(result.features_by_name) == names
             else:
                 assert result == expected
 
@@ -126,9 +126,10 @@ def main():
         "platform": platform.platform(), "gc_enabled": gc.isenabled(),
         "selected_counts": args.selected, "repeats": args.repeats, "warmups": args.warmups, "runs": [],
         "workload": "Synthetic conditional sums; rows spread across selected loan types, random ages 0-119 days",
+        "timing_scope": "Metadata preparation and/or in-memory feature compute; no retrieval, inference or network",
     }
     print(f"Python {report['python']} | {report['platform']} | {args.repeats} samples per case", flush=True)
-    print(f"{'Combinations':>12} {'Selected':>8} {'Rows':>7} {'Path':<14} {'p50 ms':>10} {'p95 ms':>10}", flush=True)
+    print(f"{'Combinations':>12} {'Selected':>8} {'Rows':>7} {'Path':<24} {'p50 ms':>10} {'p95 ms':>10}", flush=True)
     for combinations in args.combinations:
         # Benchmark-only isolation: exercise real decorators/APIs without accumulating catalog entries.
         with patch.object(registry, "default_registry", registry.Registry()):
@@ -139,7 +140,7 @@ def main():
                     run = benchmark(rows, combinations, args.repeats, args.warmups, selection)
                     report["runs"].append(run)
                     for name, timing in run["timings"].items():
-                        print(f"{combinations:>12} {selected:>8} {rows:>7} {name:<14} {timing['p50_ms']:>10.3f} "
+                        print(f"{combinations:>12} {selected:>8} {rows:>7} {name:<24} {timing['p50_ms']:>10.3f} "
                               f"{timing['p95_ms']:>10.3f}", flush=True)
             if combinations == max(args.combinations) and args.profile_iterations:
                 report["compile_profile"] = {

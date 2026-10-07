@@ -7,7 +7,7 @@ their execution for each payload.
 ```text
 Definition time:  @field / @feature → registry
 
-Request time:    raw payload → source rows + root context → calculated fields
+Request time:    raw payload → source records + root context → calculated fields
                                                         → selected features → result dict
                 └────────────── compute_features() coordinates this ─────────────────────┘
 ```
@@ -71,7 +71,7 @@ def loan_amount(rows, *, days) -> float:
 ```
 
 At definition/import time, the decorators only record the function and its metadata
-in the process-local registry. They do not read payloads, flatten rows, or compute
+in the process-local registry. They do not read payloads, prepare rows, or compute
 values. The original functions remain directly callable.
 
 - `@field`: the function name becomes a calculated row key, such as `amount_usd`.
@@ -86,9 +86,9 @@ This toy contract uses ISO date strings. Real fetchers may preserve Python
 project's payload contract. Historical ages must be relative to `as_of`, not today.
 
 The next two sections show intermediate data **inside a compute call**; you do not
-need to construct it yourself or call a separate flattening API.
+need to construct it yourself or call a separate preparation API.
 
-## 3. Raw payload → flat source rows
+## 3. Raw payload → source rows
 
 For `source="loans"`, the runtime reads `payload["loans"]` and merges root scalar
 values into each row. The intermediate rows are:
@@ -106,22 +106,45 @@ values into each row. The intermediate rows are:
 ]
 ```
 
-The flattened `loans` segment is `{ "loans": [ ...rows below... ] }`. Every row
-receives the root context (`user_id`, `as_of`, `local_per_usd`) and the loan's
-own fields. Nested objects are inlined onto that row from the deepest object, so
-`agreement.term.months` becomes `months` beside `agreement_id` and
-`interest_rate`. A list nested under the loan, such as `payments`, is copied
-onto the loan and repeats the loan once per element. The loan's own key wins
-when a deeper object uses the same name. MySQL and Spark still return the
-nested payload; this runs only while preparing feature rows.
+Every row receives the root context (`user_id`, `as_of`, `local_per_usd`) and the
+loan's own fields. One loan always remains one source row. Nested objects and
+lists stay in place: access `row["agreement"]["term"]["months"]` explicitly rather
+than silently merging child fields or multiplying loans by their payments.
 
 - A source object becomes one row. A source list stays a list. A missing source or an empty list gives the feature no rows, and the feature chooses the result.
 - Root dictionaries and lists are not copied into other sources. Scalar values,
   including null, are included.
 - Source-row keys override root keys on collisions.
-- The original payload is not modified.
+- The runtime makes one shallow row copy. Nested values remain shared and must
+  be treated as read-only; user functions must not mutate them.
 
-## 4. Flat rows → calculated fields
+### Fields can reduce or transform nested lists
+
+This is a separate example, not another declaration to add to the toy functions:
+
+```python
+@field(source="loans")
+def paid_amount(row) -> float:
+    return sum(payment["amount"] for payment in row["payments"])
+
+@field(source="loans")
+def payment_amounts(row) -> list[float]:
+    return [payment["amount"] for payment in row["payments"]]
+
+@feature(source="loans")
+def largest_payment(rows) -> float | None:
+    return max(
+        (amount for row in rows for amount in row["payment_amounts"]),
+        default=None,
+    )
+```
+
+Fields can return a scalar or a list stored under their function name; neither
+changes the source's row count. Handle optional objects explicitly in field
+code. Required objects can be accessed directly; retrieval uses empty lists for
+missing collections and `None` for missing singular objects.
+
+## 4. Source rows → calculated fields
 
 The runtime calls **every registered field for the selected source once per row**.
 Both fields see the same row plus root context; fields cannot depend on another
@@ -168,7 +191,7 @@ assert compute_features(payload) == {
 }
 ```
 
-For the first call, `compute_features()` validates the registered definitions,
+For each call, `compute_features()` prepares the registered definitions,
 resolves the two requested names, groups them under `loans`, prepares those source
 rows once, and executes the two aggregations. The 90-day aggregation does not run.
 Each new request prepares its own definitions and rows; feature values are not cached.
@@ -180,7 +203,13 @@ work: sharing row preparation does not combine their aggregation scans.
 
 `compute_features()` includes definition preparation on every call. Optional
 startup preparation remains available for latency-sensitive services, but is not
-required for this usage pattern; see the main README's advanced section.
+required for this usage pattern; see the main README's optional startup preparation section.
+
+Project-definition checks run separately in development/CI, using the optional
+`mirus-validation` package. Import your feature modules and call
+`validate_project("payload.yaml")` with the matching project contract. This checks
+all declarations without computing any values. Preparation does not repeat those
+checks on each request; validation does not configure the serving process.
 
 ## 6. How backtesting reuses the same logic
 
@@ -204,20 +233,22 @@ assert offline_plan.output_schema == {
     "loan_amount_usd_30d": float,
 }
 assert offline_plan.required_sources == ("loans",)
-assert offline_plan.fields_by_source["loans"][0].function is amount_usd
-assert offline_plan.features_by_source["loans"][0].function is loan_count
-assert offline_plan.features_by_source["loans"][1].function.func is loan_amount
-assert offline_plan.features_by_source["loans"][1].function.keywords == {"days": 30}
+assert offline_plan.fields_by_source["loans"]["amount_usd"] is amount_usd
+assert offline_plan.features_by_source["loans"]["loan_count"] is loan_count
+amount_30d = offline_plan.features_by_source["loans"]["loan_amount_usd_30d"]
+assert amount_30d.func is loan_amount
+assert amount_30d.keywords == {"days": 30}
 ```
 
 The last callable is a `functools.partial` of the original function—not a rewritten
-SQL implementation. Return annotations supply Python output types for offline
-metadata; they do not validate or coerce runtime values. `OfflinePlan` is metadata,
+SQL implementation. `OfflinePlan.output_types` derives return annotations from its
+selected catalog when read; the compiler does not store a separate type list.
+Annotations do not validate or coerce runtime values. `OfflinePlan` is metadata,
 not an executable Spark job or a payload accepted by `compute_features()`.
 
 ### Available today: historical payload retrieval
 
-`OfflineFetcher` delegates to `SparkFetcher`, which reads warehouse tables, applies
+`SparkFetcher` reads warehouse tables, applies
 point-in-time joins, and assembles one payload column per driver observation using
 the shared YAML contract. A driver row identifies an entity and its observation
 time; it is not necessarily one row per unique user.
@@ -226,40 +257,85 @@ The following sketch requires your Spark session, driver DataFrame, and configur
 warehouse tables. It uses the existing retrieval example, not the toy payload above:
 
 ```python
-from mirus.backtest import OfflineFetcher
+from mirus.backtest.spark.fetcher import SparkFetcher
 from mirus.payload import Payload
 
-definition = Payload.from_yaml("examples/credit_application.yaml").validate()
-historical = OfflineFetcher(definition, spark).fetch(driver)
+definition = Payload.from_yaml("examples/credit_application.yaml")
+historical = SparkFetcher(definition, spark).fetch(driver)
 # historical contains observation keys/time plus a nested Spark struct: payload.
 ```
 
 The shared contract maps online DB and warehouse fields into consistent payload
 names. Historical correctness additionally requires appropriate availability
-timestamps and mutation history; identical feature functions alone cannot prevent
+timestamps and complete version history; identical feature functions alone cannot prevent
 future-data leakage. The toy date strings, currency context, and source fields
 would need a matching contract in a real project.
 
-### Planned: distributed feature execution adapter
+Set `mutable: true` on a source whose values can change. Its `dwh` table must contain
+complete historical row snapshots, including the initial and latest versions.
+No separate mutation-table key, CDC metadata columns, or union with today's state are required.
+For example, keep the original creation date as a business field and mark the
+version's availability time separately:
+
+```yaml
+mutable: true
+db: lending.loan_record
+dwh: lending_history.loan_record_versions
+fields:
+  loan_id: {type: string, primary_key: true}
+  createdat: {type: timestamp}
+  updatedat: {type: timestamp, available_at: true}
+```
+
+This is a fragment of a payload section; keep its relationship and other fields.
+PIT retrieval selects the latest version available for each observation, preserving
+all distinct loan IDs. Key/time pairs must be unique, and hard deletes are not yet
+supported. Use `mutable: false` (the default) for immutable warehouse records; this
+skips the version window. Each nested source declares its own mutability.
+
+### Distributed feature execution
 
 ```text
 Online:   request / OnlineFetcher → Python payload → compute_features → result dict
 Offline:  driver + warehouse → SparkFetcher PIT payloads
-                           → UDF / Pandas UDF adapter → same compute_features → feature columns
-                             [adapter not implemented yet]
+                           → Arrow UDF / pandas UDF → same compute_features → feature columns
 ```
 
-The future adapter must convert Spark payload structs to the agreed Python shape
-and map output annotations to a Spark schema. Workers use the same feature
-computation as `compute_features(payload, feature_names=names)`, not rewritten
-SQL formulas. Definition preparation can be reused internally by that adapter;
-users do not need to manage it in their feature code. Customer feature modules
-and their dependencies must still be available on workers.
+```python
+from mirus.backtest import Backtest
+from mirus.backtest.spark.config import configure_spark
 
-This execution adapter and automatic Spark schema conversion are **not implemented
-yet**. A Pandas UDF would provide batched transport; it would not automatically
-vectorize arbitrary Python feature functions. Matching logic also requires matching
-input types, reference times, and null semantics across online and offline payloads.
+configure_spark(spark)
+backtest = Backtest(
+    payload_yaml="examples/credit_application.yaml",
+    backend="spark.pandas",  # Or "spark"; definitions and results remain the same.
+)
+features = backtest.compute(
+    driver,
+    feature_names=["loan_count", "loan_total_amount_usd"],
+)
+```
+
+This sketch uses the `loan_features` definitions and warehouse contract, not the
+earlier toy date-string payload. Import that module first. `Backtest` parses the YAML
+once when created. Each compute call prepares a fresh selected catalog and retrieves
+only its required top-level sources, retaining
+their full nested data. It maps scalar return annotations into a flat Spark schema.
+Both paths return observation keys/time plus selected feature columns, without
+triggering an action; write or otherwise consume the result to execute the job.
+
+Omit `feature_names` to compute all imported features, or pass `[]` to return only
+observation keys/time without source joins or a UDF. Reuse the same `Backtest`
+instance for different selections; the original payload contract is not modified.
+
+The Arrow scalar UDF uses `asDict(recursive=True)` to convert nested Rows. The
+pandas UDF receives dictionaries and arrays and normalizes containers and timestamps
+without input-schema conversion. Large nullable integers can lose precision in
+Spark/Arrow input or output conversion; support for this case is deferred.
+The pandas path loops through observations; users do not rewrite features as
+pandas operations. Customer feature modules and dependencies must be installed on
+workers. Matching logic also requires matching input types, UTC reference times and
+null semantics across online and offline payloads.
 
 ## Runnable examples and fixtures
 

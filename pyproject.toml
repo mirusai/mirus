@@ -16,6 +16,7 @@ Repository = "https://github.com/mirusai/mirus"
 [project.optional-dependencies]
 mysql = ["PyMySQL>=1.1,<2"]
 spark = ["mirus-backtest[spark]==0.1.0"]
+validation = ["mirus-validation==0.1.0"]
 test = ["pytest>=8,<9"]
 
 [tool.setuptools]

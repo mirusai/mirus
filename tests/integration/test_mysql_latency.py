@@ -13,6 +13,7 @@ import pytest
 
 from mirus.serving import MySQLConnection, OnlineFetcher
 from mirus.payload import Field, JoinKey, Payload, PayloadSection, Relationship
+from mirus.validation import validate_payload
 
 TABLE = "mirus_mysql_fetcher_latency"
 pytestmark = pytest.mark.skipif(
@@ -100,7 +101,7 @@ def mysql_fetcher():
         ),
     )
     fetcher = OnlineFetcher(
-        Payload(
+        validate_payload(Payload(
             name="mysql_latency",
             version=1,
             root=PayloadSection(
@@ -112,7 +113,7 @@ def mysql_fetcher():
                 },
                 children={"features": child},
             ),
-        ).validate(),
+        )),
         connection,
     )
     yield fetcher

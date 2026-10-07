@@ -54,9 +54,9 @@ def benchmark(count, repeats, warmups):
     prepared = prepare_rows(payload)
     cases = {
         "raw_aggregation_only": lambda: raw_aggregations(prepared),
-        "raw_end_to_end": lambda: raw_aggregations(prepare_rows(payload)),
-        "prepared_catalog": lambda: compute_features(payload, catalog=CATALOG),
-        "compute_features": lambda: compute_features(payload, feature_names=FEATURE_NAMES),
+        "raw_in_memory_compute": lambda: raw_aggregations(prepare_rows(payload)),
+        "prepared_fixed_compute": lambda: compute_features(payload, catalog=CATALOG),
+        "prepare_and_compute": lambda: compute_features(payload, feature_names=FEATURE_NAMES),
     }
     expected = raw_aggregations(prepared)
     for function in cases.values():
@@ -94,6 +94,7 @@ def main():
         "python": platform.python_version(), "platform": platform.platform(),
         "gc_enabled": gc.isenabled(), "repeats": args.repeats, "warmups": args.warmups,
         "selected_features": FEATURE_NAMES,
+        "timing_scope": "In-memory row preparation and aggregation; no retrieval, inference or network",
         "runs": [benchmark(count, args.repeats, args.warmups) for count in args.rows],
     }
     print(f"Python {report['python']} | {report['platform']} | {args.repeats} samples per case")

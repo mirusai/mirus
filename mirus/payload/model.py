@@ -33,17 +33,16 @@ class PayloadSection:
     fields: dict[str, Field]
     db_table: str | None = None
     dwh_table: str | None = None
-    mutations_table: str | None = None
+    mutable: bool = False  # Mutable sources require complete DWH row-version history.
     relationship: Relationship | None = None
     children: dict[str, PayloadSection] = field(default_factory=dict)
     source: str | None = None
+    field_mapping: dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def _from_definition(cls, name: str, definition: dict) -> PayloadSection:
-        settings = {"source", "fields", "db", "dwh", "relationship", "field_mapping"}
+        settings = {"source", "fields", "db", "dwh", "mutable", "relationship", "field_mapping"}
         mapping = definition.get("field_mapping", {})
-        if set(mapping) - set(definition["fields"]):
-            raise ValueError(f"{name}: field_mapping refers to undeclared fields")
         relationship = definition.get("relationship")
         return cls(
             name=name,
@@ -57,9 +56,9 @@ class PayloadSection:
                 )
                 for name, spec in definition["fields"].items()
             },
-            db_table=definition.get("db", {}).get("table"),
-            dwh_table=definition.get("dwh", {}).get("table"),
-            mutations_table=definition.get("dwh", {}).get("mutations_table"),
+            db_table=definition.get("db"),
+            dwh_table=definition.get("dwh"),
+            mutable=definition.get("mutable", False),
             relationship=Relationship(
                 cardinality=relationship["type"],
                 keys=[JoinKey(parent, child) for parent, child in relationship["on"].items()],
@@ -67,6 +66,7 @@ class PayloadSection:
             children={name: cls._from_definition(name, child)
                       for name, child in definition.items() if name not in settings},
             source=definition.get("source"),
+            field_mapping=dict(mapping),
         )
 
     @property
@@ -85,7 +85,7 @@ class PayloadSection:
 
 @dataclass
 class Payload:
-    """The single public definition passed to OnlineFetcher or OfflineFetcher."""
+    """Shared payload contract consumed by online and historical retrieval."""
 
     name: str
     version: int
@@ -118,43 +118,3 @@ class Payload:
             version=definition["version"],
             root=PayloadSection._from_definition("payload", definition["payload"]),
         )
-
-    def validate(self) -> Payload:
-        """Check definition structure only, without querying either backend.
-
-        Database schemas, data types at runtime, cardinality and completeness
-        checks are intentionally left for a later implementation pass.
-        """
-        if not self.name or type(self.version) is not int or self.version < 1:
-            raise ValueError("Payload needs a name and a positive integer version")
-        if self.root.source != "request":
-            raise ValueError("payload.source must be request")
-
-        def visit(section, parent=None, path="payload"):
-            if not section.fields or not section.primary_keys:
-                raise ValueError(f"{path}: fields and a primary key are required")
-            marker = "observation_time" if parent is None else "available_at"
-            other = "available_at" if parent is None else "observation_time"
-            times = [spec for spec in section.fields.values() if getattr(spec, marker)]
-            if len(times) != 1 or times[0].data_type != "timestamp":
-                raise ValueError(f"{path}: one timestamp marked {marker} is required")
-            if any(getattr(spec, other) for spec in section.fields.values()):
-                raise ValueError(f"{path}: unexpected {other} marker")
-            if set(section.fields) & set(section.children):
-                raise ValueError(f"{path}: field and child names must be different")
-            if parent is not None:
-                if not (section.db_table or section.dwh_table):
-                    raise ValueError(f"{path}: a DB or DWH table is required")
-                relationship = section.relationship
-                if relationship is None or relationship.cardinality not in {"one-to-one", "one-to-many", "many-to-one"}:
-                    raise ValueError(f"{path}: unsupported relationship type")
-                if not relationship.keys or any(
-                    key.parent not in parent.fields or key.child not in section.fields
-                    for key in relationship.keys
-                ):
-                    raise ValueError(f"{path}: join keys must exist on the parent and child")
-            for name, child in section.children.items():
-                visit(child, section, f"{path}.{name}")
-
-        visit(self.root)
-        return self

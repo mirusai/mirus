@@ -13,7 +13,7 @@ ParameterChoices = dict[str, Sequence[object]]
 def _snapshot_parameters(
     parameters: ParameterChoices | None,
 ) -> tuple[tuple[str, object], ...]:
-    """Freeze valid choice containers while preserving invalid input for compile."""
+    """Freeze choice containers while preserving invalid input for validation."""
     snapshot = []
     for name, values in (parameters or {}).items():
         choices = (

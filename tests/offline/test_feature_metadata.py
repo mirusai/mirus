@@ -15,6 +15,54 @@ def _base_function(function):
     return function.func if isinstance(function, partial) else function
 
 
+def test_single_feature_metadata_does_not_execute_or_require_unused_annotations():
+    @field(source="loans")
+    def amount(row):
+        raise AssertionError("Metadata executed a field")
+
+    @feature(source="loans", feature_name="loan_count")
+    def count(rows) -> int:
+        raise AssertionError("Metadata executed a feature")
+
+    @feature(source="devices")
+    def unused(rows):
+        raise AssertionError("Metadata executed an unselected feature")
+
+    plan = compile_offline(["loan_count"])
+    assert plan.output_types == (("loan_count", int),)
+    assert plan.output_schema == {"loan_count": int}
+    assert compile_offline([]).output_types == ()
+
+
+def test_parameterized_metadata_preserves_selection_and_nullable_types():
+    @feature(source="loans", feature_name="amount_{kind}_{purpose}_{days}",
+             parameters={"kind": ["credit", "home", "private"],
+                         "purpose": ["shopping", "medical"], "days": [30, 90]})
+    def amount(rows, *, kind, purpose, days) -> float | None:
+        raise AssertionError("Metadata executed a feature")
+
+    @feature(source="loans")
+    def count(rows) -> int:
+        raise AssertionError("Metadata executed a feature")
+
+    assert len(compile_offline().output_schema) == 13
+    names = ["amount_home_medical_90", "count", "amount_credit_shopping_30"]
+    plan = compile_offline(names)
+    assert plan.feature_names == tuple(names)
+    assert plan.output_types == ((names[0], float | None), ("count", int), (names[2], float | None))
+    assert plan.output_schema == {names[0]: float | None, "count": int, names[2]: float | None}
+
+
+def test_output_types_requires_return_annotations_when_accessed():
+    @feature(source="loans")
+    def untyped(rows):
+        return len(rows)
+
+    plan = compile_offline(["untyped"])
+    with pytest.raises(TypeError, match="return annotation"):
+        _ = plan.output_types
+
+
 def test_online_and_offline_compilers_have_selection_parity(
     isolated_feature_registry,
 ):
@@ -31,7 +79,8 @@ def test_online_and_offline_compilers_have_selection_parity(
         return sum((row["dollars"] for row in rows), 0.0) + days
 
     # Collection stores one raw family; each compiler expands it independently.
-    assert len(isolated_feature_registry.snapshot().features) == 1
+    _, declarations = isolated_feature_registry.snapshot()
+    assert len(declarations) == 1
     names = ["amount_90d", "amount_30d", "amount_90d"]
     offline = compile_offline(names)
 
@@ -42,19 +91,18 @@ def test_online_and_offline_compilers_have_selection_parity(
     }
     assert offline.required_sources == ("loans",)
     assert offline.field_names_by_source == {"loans": ("dollars",)}
-    assert offline.fields_by_source["loans"][0].function is dollars
+    assert offline.fields_by_source["loans"]["dollars"] is dollars
 
-    online_features = tuple(prepare_features(names).features_by_name.values())
+    online = prepare_features(names)
+    online_features = online.features_by_source["loans"]
     offline_features = offline.features_by_source["loans"]
-    assert tuple(feature.name for feature in online_features) == offline.feature_names
-    assert tuple(feature.name for feature in online_features) == tuple(
-        feature.name for feature in offline_features
-    )
-    assert tuple(_base_function(feature.function) for feature in online_features) == (
+    assert offline.features_by_source is offline.catalog.features_by_source
+    assert tuple(online_features) == offline.feature_names == tuple(offline_features)
+    assert tuple(_base_function(function) for function in online_features.values()) == (
         amount,
         amount,
     )
-    assert tuple(_base_function(feature.function) for feature in offline_features) == (
+    assert tuple(_base_function(function) for function in offline_features.values()) == (
         amount,
         amount,
     )

@@ -15,26 +15,14 @@ class OnlineFetcher:
     available_backends = ("mysql",)
 
     def __init__(self, payload: Payload, connection, *, backend: str = "mysql"):
-        self._implementation: OnlineBackend = self._create_implementation(
-            backend, payload, connection
-        )
+        if backend != "mysql":
+            raise NotImplementedError(
+                f"online backend {backend!r} is not implemented; "
+                f"available backends: {', '.join(self.available_backends)}"
+            )
+        from .mysql import MySQLFetcher
 
-    @staticmethod
-    def _create_implementation(backend: str, payload: Payload, connection):
-        """Create the selected backend without exposing its class to callers."""
-        if backend == "mysql":
-            # Import lazily so the public interface has no PyMySQL dependency.
-            from .mysql import MySQLFetcher
-
-            return MySQLFetcher(payload, connection)
-
-        # Future online backends (for example Redis or DynamoDB) are added here
-        # without changing the public OnlineFetcher API.
-        available = ", ".join(OnlineFetcher.available_backends)
-        raise NotImplementedError(
-            f"online backend {backend!r} is not implemented; "
-            f"available backends: {available}"
-        )
+        self._implementation: OnlineBackend = MySQLFetcher(payload, connection)
 
     def fetch(self, request: dict[str, Any]) -> dict[str, Any]:
         """Fetch a Python payload using the configured online implementation."""
