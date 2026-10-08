@@ -303,9 +303,14 @@ Offline:  driver + warehouse → SparkFetcher PIT payloads
 
 ```python
 from mirus.backtest import Backtest
-from mirus.backtest.spark.config import configure_spark
+from mirus.backtest.spark.config import RECOMMENDED_SPARK_CONFIG
 
-configure_spark(spark)
+for key, value in RECOMMENDED_SPARK_CONFIG.items():
+    spark.conf.set(key, value)
+# Override recommendations directly when needed.
+spark.conf.set("spark.sql.execution.arrow.maxRecordsPerBatch", "128")
+
+driver = spark.table("analytics.credit_observations")
 backtest = Backtest(
     payload_yaml="examples/credit_application.yaml",
     backend="spark.pandas",  # Or "spark"; definitions and results remain the same.
@@ -315,6 +320,10 @@ features = backtest.compute(
     feature_names=["loan_count", "loan_total_amount_usd"],
 )
 ```
+
+The recommendations are optional, not automatically applied. Users create and
+configure Spark themselves; the driver DataFrame supplies its session to backtesting.
+Arrow batch size counts observations, not the records nested inside each payload.
 
 This sketch uses the `loan_features` definitions and warehouse contract, not the
 earlier toy date-string payload. Import that module first. `Backtest` parses the YAML

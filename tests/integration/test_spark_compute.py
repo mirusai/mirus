@@ -20,12 +20,15 @@ def spark():
     pytest.importorskip("pandas")
     pytest.importorskip("pyarrow")
     from pyspark.sql import SparkSession
-    from mirus.backtest.spark.config import configure_spark
+    from mirus.backtest.spark.config import RECOMMENDED_SPARK_CONFIG
 
-    session = (SparkSession.builder.master("local[2]").appName("mirus-udf-parity")
+    builder = SparkSession.builder.master("local[2]").appName("mirus-udf-parity")
+    for key, value in RECOMMENDED_SPARK_CONFIG.items():
+        builder = builder.config(key, value)
+    session = (builder
                .config("spark.ui.enabled", "false").config("spark.sql.shuffle.partitions", "2")
+               .config("spark.sql.execution.arrow.maxRecordsPerBatch", "2")
                .getOrCreate())
-    configure_spark(session, batch_rows=2)
     session.sparkContext.setLogLevel("ERROR")
     yield session
     session.stop()
@@ -151,6 +154,8 @@ def test_none_selection_computes_every_registered_feature(spark, monkeypatch, ba
     driver = spark.createDataFrame([("U1", datetime(2026, 1, 15)), ("U2", datetime(2026, 1, 15))],
                                    "user_id string, as_of timestamp")
     result = Backtest("unused.yaml", backend=backend).compute(driver)
+    assert driver.sparkSession.conf.get("spark.sql.execution.arrow.maxRecordsPerBatch") == "2"
+    assert driver.sparkSession.conf.get("spark.sql.shuffle.partitions") == "2"
     assert result.columns == ["user_id", "as_of", "count", "total"]
     assert {row.user_id: (row["count"], row.total) for row in result.collect()} == {
         "U1": (1, 100.0), "U2": (0, 0.0)}

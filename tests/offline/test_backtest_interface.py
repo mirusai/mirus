@@ -69,6 +69,7 @@ def test_compute_prepares_selection_and_prunes_only_sources(payload, engine, nam
     engine.return_value.compute.assert_called_once()
     driver.collect.assert_not_called()
     driver.count.assert_not_called()
+    driver.sparkSession.conf.set.assert_not_called()
 
 
 @pytest.mark.usefixtures("isolated_feature_registry")

@@ -100,9 +100,14 @@ DB/DWH types and UTC timestamp conventions must match.
 ```python
 import examples.loan_features  # Import your feature definitions before computing.
 from mirus.backtest import Backtest
-from mirus.backtest.spark.config import configure_spark
+from mirus.backtest.spark.config import RECOMMENDED_SPARK_CONFIG
 
-configure_spark(spark, batch_rows=256)  # Explicit UTC and Arrow batch settings.
+# Use your existing session; applying these recommendations is optional.
+for key, value in RECOMMENDED_SPARK_CONFIG.items():
+    spark.conf.set(key, value)
+
+# Read and prepare the observations using your own Spark code.
+driver = spark.table("analytics.credit_observations")
 backtest = Backtest(
     payload_yaml="examples/credit_application.yaml",
     backend="spark.pandas",  # Or "spark" for the Arrow scalar UDF; default is spark.
@@ -113,6 +118,12 @@ result = backtest.compute(
 )
 # Lazy DataFrame: observation keys/time plus the selected feature columns.
 ```
+
+Users own Spark session creation, configuration and shutdown. `Backtest` uses
+`driver.sparkSession` without modifying its settings. The recommendations enable
+AQE, UTC and bounded Arrow batches; override settings directly with `spark.conf.set`.
+Shuffle partition counts, executor resources and dynamic allocation remain under
+user control. Executor and allocation settings belong in application startup.
 
 `Backtest` loads the YAML once at construction. Each compute call prepares its
 selection on the driver without caching. Both backends skip unused top-level sources and execute
